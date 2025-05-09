@@ -1,0 +1,156 @@
+library(tidyverse)
+library(readxl)
+library(gridExtra)
+library(ggvenn)
+library(ggpubr)
+library(reshape2)
+library(ggforce)
+library(Biobase)
+library(ggpubr)
+library(readxl)
+
+
+# Extract list of proteins  -----------------------------------------------
+
+#DE analysis 
+T1_SGAvsAGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T1_SGA_AGA_adj_nulli_bmi.xlsx")
+T1_SGAvsAGA_sig <- T1_SGAvsAGA %>%
+  filter(adj.P.Val < 0.05)
+
+T2_SGAvsAGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T2_SGA_AGA_adj_nulli_bmi.xlsx")
+T2_SGAvsAGA_sig <- T2_SGAvsAGA %>%
+  filter(adj.P.Val < 0.05)
+
+T3_SGAvsAGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T3_SGA_AGA_adj_nulli_bmi.xlsx")
+T3_SGAvsAGA_sig <- T3_SGAvsAGA %>%
+  filter(adj.P.Val < 0.05)
+
+T1_LGAvsAGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T1_LGA_AGA_adj_nulli_bmi.xlsx")
+T1_LGAvsAGA_sig <- T1_LGAvsAGA %>%
+  filter(adj.P.Val < 0.05) %>%
+  slice_head(n = 20)
+
+T2_LGAvsAGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T2_LGA_AGA_adj_nulli_bmi.xlsx")
+T2_LGAvsAGA_sig <- T2_LGAvsAGA %>%
+  filter(adj.P.Val < 0.05) %>%
+  slice_head(n = 20)
+
+T3_LGAvsAGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T3_LGA_AGA_adj_nulli_bmi.xlsx")
+T3_LGAvsAGA_sig <- T3_LGAvsAGA %>%
+  filter(adj.P.Val < 0.05) %>%
+  slice_head(n = 20)
+
+sig_DE_proteins <- c(T1_SGAvsAGA_sig$AptName, T2_SGAvsAGA_sig$AptName, T3_SGAvsAGA_sig$AptName, 
+                     T1_LGAvsAGA_sig$AptName, T2_LGAvsAGA_sig$AptName, T3_LGAvsAGA_sig$AptName)
+
+sig_DE_proteins <- unique(sig_DE_proteins)
+
+rm(T1_SGAvsAGA, T1_SGAvsAGA_sig, T2_SGAvsAGA, T2_SGAvsAGA_sig, T3_SGAvsAGA, T3_SGAvsAGA_sig,
+   T1_LGAvsAGA, T1_LGAvsAGA_sig, T2_LGAvsAGA, T2_LGAvsAGA_sig, T3_LGAvsAGA, T3_LGAvsAGA_sig)
+
+# Format dataset ----------------------------------------------------------
+load("../Data/MOM_exprset_STORK_SGA_LGA.RData")
+#load("../Data/winslgRFU_exprset_STORK_SGA_LGA.RData")
+
+
+MOM_exprs <- exprs(MoM_exprset_STORK_LGA_SGA)
+#lgRFU_exprs <- exprs(winslgRFU_exprset_STORK_LGA_SGA)
+prot <- fData(MoM_exprset_STORK_LGA_SGA)
+samp <- pData(MoM_exprset_STORK_LGA_SGA)
+
+#Format the expression matrix
+MOM_exprs <- melt(MOM_exprs)
+colnames(MOM_exprs) <- c("AptName", "SampleID", "MoM")
+#lgRFU_exprs <- melt(lgRFU_exprs)
+#colnames(lgRFU_exprs) <- c("AptName", "SampleID", "lgRFU")
+
+
+#Format the samp data
+samp <- samp %>%
+  select(TimePoint, GAWeeks, Bwkat, `Birthweight z-score`, BMI, Nulliparity) %>%
+  rownames_to_column(var = "SampleID")
+
+samp$TimePoint2 <- samp$TimePoint
+samp$TimePoint2 <- gsub("1", "Visit 1", samp$TimePoint2)
+samp$TimePoint2 <- gsub("2", "Visit 2", samp$TimePoint2)
+samp$TimePoint2 <- gsub("3", "Visit 3", samp$TimePoint2)
+
+#Merge expression data and samp
+MOM_exprs <- merge(samp, MOM_exprs, by = "SampleID")
+#lgRFU_exprs <- merge(samp, lgRFU_exprs, by = "SampleID")
+
+#Select the relevant columns from prot
+prot <- prot %>%
+  select(SomaId, TargetFullName, AptName, EntrezGeneSymbol)
+
+prot <- prot %>%
+  mutate(EntrezGeneSymbol2 = paste0("(", EntrezGeneSymbol,  ")"))
+prot$TargetFullName_EntrezGeneSymbol <- paste(prot$TargetFullName, prot$EntrezGeneSymbol2)
+
+#Merge expression data and prot
+MOM_exprs <- merge(prot, MOM_exprs, by = "AptName")
+#lgRFU_exprs <- merge(prot, lgRFU_exprs, by = "AptName")
+
+
+#Merge TargetFullName_EntrezGeneSymbol with TimePoint2
+MOM_exprs$TargetFullName_EntrezGeneSymbol_TimePoint <- paste(MOM_exprs$TargetFullName_EntrezGeneSymbol, MOM_exprs$TimePoint2)
+#lgRFU_exprs$TargetFullName_EntrezGeneSymbol_TimePoint <- paste(lgRFU_exprs$TargetFullName_EntrezGeneSymbol, lgRFU_exprs$TimePoint2)
+
+swr = function(string, nwrap=40) {
+  paste(strwrap(string, width=nwrap), collapse="\n")
+}
+swr = Vectorize(swr)
+
+MOM_exprs$TargetFullName_EntrezGeneSymbol_TimePoint <- swr(MOM_exprs$TargetFullName_EntrezGeneSymbol_TimePoint)
+
+
+# Plot corr ---------------------------------------------------------------
+pdf("../Corr_plots/Corr_plots_DE_proteins2.pdf",
+    width = 10, height = 12)
+
+
+for(i in 1:11) {
+print(ggplot(data = MOM_exprs, aes(x = `Birthweight z-score`, y = MoM, color = Bwkat)) +
+  geom_point(alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", group = 1) +
+  stat_cor(method = "pearson", r.digits = 2, p.digits = 2, color = "black", group = 1) +
+  theme_classic() +
+  xlab("Birth weight (z- score)") +
+  ylab("MoM") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 10),
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_text(size = 12),
+        axis.text = element_text(size = 12)) + 
+  facet_wrap_paginate(~TargetFullName_EntrezGeneSymbol_TimePoint, ncol = 3, nrow = 3, scales = "free", page = i))
+
+}
+dev.off()
+
+#plot_corr <- ggplot(data = MOM_exprs, aes(x = `Birthweight z-score`, y = MoM, color = Bwkat)) +
+#  geom_point(alpha = 0.8) +
+#  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+#  geom_smooth(method = "lm", se = TRUE, color = "black", group = 1) +
+#  stat_cor(method = "pearson", r.digits = 2, p.digits = 2, color = "black", group = 1) +
+#  theme_classic() +
+#  xlab("Birth weight (z- score)") +
+#  ylab("MoM") +
+#  theme(legend.title = element_blank(),
+#        strip.text = element_text(size = 10),
+#        axis.title.y = element_text(size = 15),
+#        axis.title.x = element_text(size = 12),
+#        axis.text = element_text(size = 12)) + 
+#  facet_wrap_paginate(~TargetFullName_EntrezGeneSymbol_TimePoint, ncol = 3, nrow = 4, scales = "free", page = i)
+
+#ggsave(filename= "Corr_plots.png",
+#       plot = plot_corr,
+#       device = "png",
+#       path = "../Corr_plots",
+#       width = 25,
+#       height = 32,
+#       units = "cm")
+
+
+
+
