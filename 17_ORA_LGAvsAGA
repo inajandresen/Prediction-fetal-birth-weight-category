@@ -1,0 +1,480 @@
+library(org.Hs.eg.db)
+library(readxl)
+library(tidyverse)
+library(writexl)
+library(readxl)
+library(clusterProfiler)
+library(enrichplot)
+library(ReactomePA)
+library(DOSE)
+library(gridExtra)
+library(grid)
+#library(cowplot)
+library(AnnotationHub)
+#library(MeSHDbi)
+#library(meshes)
+
+
+# Create a background list --------------------------------------------------
+
+
+#Create a background list consisting the 5000 proteins included in the initial analysis 
+load("../Data/MOM_exprset_STORK_SGA_LGA.RData")
+prot <- fData(MoM_exprset_STORK_LGA_SGA)
+background <- prot %>%
+  dplyr::select(AptName, EntrezGeneID, EntrezGeneSymbol)
+rm(MoM_exprset_STORK_LGA_SGA)
+rm(prot)
+
+write_xlsx(background, path = "../Enrichment_LGA/Backgroundlist_for_GOerichment_5000proteins.xlsx",
+           col_names = TRUE)
+
+# Load the limma restuls --------------------------------
+
+#Load the background
+background <- read_xlsx("../Enrichment_LGA/Backgroundlist_for_GOerichment_5000proteins.xlsx",
+                        col_names = TRUE)
+
+AptName_entrezID <- background %>%
+  dplyr::select(AptName, EntrezGeneID)
+
+#Load the Results
+T1_LGAvsAGA <- read_xlsx("../Limma_groups/Adjust_BMI_nulli/T1_LGA_AGA_adj_nulli_bmi.xlsx",
+                         col_names = TRUE)
+T2_LGAvsAGA <-  read_xlsx("../Limma_groups/Adjust_BMI_nulli/T2_LGA_AGA_adj_nulli_bmi.xlsx",
+                          col_names = TRUE)
+T3_LGAvsAGA <-  read_xlsx("../Limma_groups/Adjust_BMI_nulli/T3_LGA_AGA_adj_nulli_bmi.xlsx",
+                          col_names = TRUE)
+
+T1_LGAvsAGA_sig_prot <- T1_LGAvsAGA %>%
+  filter(adj.P.Val < 0.05)
+dim(T1_LGAvsAGA_sig_prot)
+
+T2_LGAvsAGA_sig_prot <- T2_LGAvsAGA %>%
+  filter(adj.P.Val < 0.05)
+dim(T2_LGAvsAGA_sig_prot)
+
+T3_LGAvsAGA_sig_prot <- T3_LGAvsAGA %>%
+  filter(adj.P.Val < 0.05)
+dim(T3_LGAvsAGA_sig_prot)
+
+T1_sig_prot <- unique(T1_LGAvsAGA_sig_prot$EntrezGeneID)
+T2_sig_prot <- unique(T2_LGAvsAGA_sig_prot$EntrezGeneID)
+T3_sig_prot <- unique(T3_LGAvsAGA_sig_prot$EntrezGeneID)
+
+T1T2T3_sig_prot <- unique(c(T1_sig_prot, T2_sig_prot, T3_sig_prot))
+
+
+# Biological Process Gene Ontology ----------------------------------------
+
+#Time point 1
+#Biological processes
+T1_enrichgo_BP <- enrichGO(T1_sig_prot, OrgDb = "org.Hs.eg.db", ont = "BP", universe = background$EntrezGeneID, pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE)
+T1_enrichgo_BP <- mutate(T1_enrichgo_BP, richFactor = Count / as.numeric(sub("/\\d+", "", BgRatio))) 
+T1_enrichgo_BP_res <- T1_enrichgo_BP@result
+write_xlsx(T1_enrichgo_BP_res, path = "../Enrichment_LGA/T1_BP_DE.xlsx",
+           col_names = TRUE)
+T1_enrichgo_BP_sig <- T1_enrichgo_BP_res %>%
+  filter(p.adjust < 0.2)
+dim(T1_enrichgo_BP_sig)
+
+#Plot the results in a dotplot
+T1_dotplot_BP <- dotplot(T1_enrichgo_BP, x = "richFactor", showCategory = 11,
+                         title = "Visit 1, GO:Biological process") +
+ scale_y_discrete(labels=function(x) str_wrap(x, width=80)) #Adjusts the length of the labels on y-axis
+
+ggsave(filename= "T1_Biological_process_dotplot.png",
+      plot = T1_dotplot_BP,
+      device = "png",
+      path = "../Scripts_without_PE/Enrichment_LGA",
+      width = 25,
+      height = 10,
+      units = "cm")
+
+
+
+#Treeplot
+T1_enrichgo_BP_clust <- pairwise_termsim(T1_enrichgo_BP)
+T1_treeplot_BP <- treeplot(T1_enrichgo_BP_clust, showCategory = 11,
+                        title = "GO: Biological process",
+                        by = "richFactor",
+                        fontsize = 10)
+
+ggsave(filename= "T1_BP_treeplot.png",
+       plot = T1_treeplot_BP,
+       device = "png",
+       path = "../Enrichment_LGA/",
+       width = 38,
+       height = 13,
+       units = "cm")
+#offset.params = list(tiplab=3)
+
+
+#Time point 2
+#Biological processes
+T2_enrichgo_BP <- enrichGO(T2_sig_prot, OrgDb = "org.Hs.eg.db", ont = "BP", universe = background$EntrezGeneID, pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE)
+T2_enrichgo_BP <- mutate(T2_enrichgo_BP, richFactor = Count / as.numeric(sub("/\\d+", "", BgRatio))) 
+T2_enrichgo_BP_res <- T2_enrichgo_BP@result
+write_xlsx(T2_enrichgo_BP_res, path = "../Enrichment_LGA/T2_BP_DE.xlsx",
+           col_names = TRUE)
+T2_enrichgo_BP_sig <- T2_enrichgo_BP_res %>%
+  filter(p.adjust < 0.2)
+dim(T2_enrichgo_BP_sig)
+
+#Time point 3
+#Biological processes
+T3_enrichgo_BP <- enrichGO(T3_sig_prot, OrgDb = "org.Hs.eg.db", ont = "BP", universe = background$EntrezGeneID, pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE)
+T3_enrichgo_BP <- mutate(T3_enrichgo_BP, richFactor = Count / as.numeric(sub("/\\d+", "", BgRatio))) 
+T3_enrichgo_BP_res <- T3_enrichgo_BP@result
+write_xlsx(T3_enrichgo_BP_res, path = "../Enrichment_LGA/T3_BP_DE.xlsx",
+           col_names = TRUE)
+T3_enrichgo_BP_sig <- T3_enrichgo_BP_res %>%
+  filter(p.adjust < 0.2)
+dim(T3_enrichgo_BP_sig)
+
+#Plot the results in a dotplot
+T3_dotplot_BP <- dotplot(T3_enrichgo_BP, x = "richFactor", showCategory = 2,
+                         title = "Visit 3, GO:Biological process") +
+  scale_y_discrete(labels=function(x) str_wrap(x, width=80)) #Adjusts the length of the labels on y-axis
+
+ggsave(filename= "T3_Biological_process_dotplot.png",
+       plot = T3_dotplot_BP,
+       device = "png",
+       path = "../Scripts_without_PE/Enrichment_Groups/Adjust_BMI_nulli",
+       width = 25,
+       height = 15,
+       units = "cm")
+
+#All time points 
+T1T2T3_enrichgo_BP <- enrichGO(T1T2T3_sig_prot, OrgDb = "org.Hs.eg.db", ont = "BP", universe = background$EntrezGeneID, pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE)
+T1T2T3_enrichgo_BP <- mutate(T1T2T3_enrichgo_BP, richFactor = Count / as.numeric(sub("/\\d+", "", BgRatio))) 
+T1T2T3_enrichgo_BP_res <- T1T2T3_enrichgo_BP@result
+write_xlsx(T1T2T3_enrichgo_BP_res, path = "../Enrichment_LGA/T1T2T3_BP_DE.xlsx",
+           col_names = TRUE)
+T1T2T3_enrichgo_BP_sig <- T1T2T3_enrichgo_BP_res %>%
+  filter(p.adjust < 0.2)
+dim(T1T2T3_enrichgo_BP_sig)
+
+#Plot the results in a dotplot
+T1T2T3_dotplot_BP <- dotplot(T1T2T3_enrichgo_BP, x = "richFactor", showCategory = 19,
+                         title = "All visits, GO:Biological process") +
+  scale_y_discrete(labels=function(x) str_wrap(x, width=80)) #Adjusts the length of the labels on y-axis
+
+ggsave(filename= "T1T2T3_Biological_process_dotplot.png",
+       plot = T1T2T3_dotplot_BP,
+       device = "png",
+       path = "../Scripts_without_PE/Enrichment_Groups/Adjust_BMI_nulli",
+       width = 25,
+       height = 25,
+       units = "cm")
+
+#Treeplot
+T1T2T3_enrichgo_BP_clust <- pairwise_termsim(T1T2T3_enrichgo_BP)
+T1T2T3_treeplot_BP <- treeplot(T1T2T3_enrichgo_BP_clust, showCategory = 19,
+                        title = "GO: Biological process",
+                        by = "richFactor",
+                        fontsize = 5)
+
+ggsave(filename= "T1T2T3_BP_treeplot.png",
+       plot = T1T2T3_treeplot_BP,
+       device = "png",
+       path = "../Enrichment_LGA/",
+       width = 40,
+       height = 15,
+       units = "cm")
+
+
+#Simplify 
+T1T2T3_enrichgo_BP_simp <- simplify(T1T2T3_enrichgo_BP)
+T1T2T3_enrichgo_BP_simp_res <- T1T2T3_enrichgo_BP_simp@result
+write_xlsx(T1T2T3_enrichgo_BP_simp_res, path = "../Enrichment_LGA/T1T2T3_BP_simp_DE.xlsx",
+           col_names = TRUE)
+T1T2T3_enrichgo_BP_simp_sig <- T1T2T3_enrichgo_BP_simp_res %>%
+  filter(p.adjust < 0.2)
+dim(T1T2T3_enrichgo_BP_simp_sig)
+
+#Plot the results in a dotplot
+T1T2T3_dotplot_BP_simp <- dotplot(T1T2T3_enrichgo_BP_simp, x = "richFactor", showCategory = 11,
+                             title = "All visits, GO:Biological process") +
+  scale_y_discrete(labels=function(x) str_wrap(x, width=80)) #Adjusts the length of the labels on y-axis
+
+ggsave(filename= "T1T2T3_Biological_process_simp_dotplot.png",
+       plot = T1T2T3_dotplot_BP_simp,
+       device = "png",
+       path = "../Scripts_without_PE/Enrichment_Groups/Adjust_BMI_nulli",
+       width = 25,
+       height = 25,
+       units = "cm")
+
+#Treeplot
+T1T2T3_enrichgo_BP_clust_simp <- pairwise_termsim(T1T2T3_enrichgo_BP_simp)
+T1T2T3_treeplot_BP_simp <- treeplot(T1T2T3_enrichgo_BP_clust_simp, showCategory = 11,
+                               title = "GO: Biological process",
+                               by = "richFactor")
+
+ggsave(filename= "T1T2T3_BP_treeplot_simp.png",
+       plot = T1T2T3_treeplot_BP_simp,
+       device = "png",
+       path = "../Enrichment_LGA",
+       width = 35,
+       height = 15,
+       units = "cm")
+
+
+# Molecular function gene ontology ----------------------------------------
+#Time point 1
+T1_enrichgo_MF <- enrichGO(T1_sig_prot, OrgDb = "org.Hs.eg.db", ont = "MF", universe = background$EntrezGeneID, pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE)
+T1_enrichgo_MF <- mutate(T1_enrichgo_MF, richFactor = Count / as.numeric(sub("/\\d+", "", BgRatio))) 
+T1_enrichgo_MF_res <- T1_enrichgo_MF@result
+write_xlsx(T1_enrichgo_MF_res, path = "../Enrichment_LGA/T1_MF_DE.xlsx",
+           col_names = TRUE)
+T1_enrichgo_MF_sig <- T1_enrichgo_MF_res %>%
+  filter(p.adjust < 0.2)
+dim(T1_enrichgo_MF_sig)
+
+
+#Time point 2
+T2_enrichgo_MF <- enrichGO(T2_sig_prot, OrgDb = "org.Hs.eg.db", ont = "MF", universe = background$EntrezGeneID, pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE)
+T2_enrichgo_MF <- mutate(T2_enrichgo_MF, richFactor = Count / as.numeric(sub("/\\d+", "", BgRatio))) 
+T2_enrichgo_MF_res <- T2_enrichgo_MF@result
+write_xlsx(T2_enrichgo_MF_res, path = "../Enrichment_LGA/T2_MF_DE.xlsx",
+           col_names = TRUE)
+T2_enrichgo_MF_sig <- T2_enrichgo_MF_res %>%
+  filter(p.adjust < 0.2)
+dim(T2_enrichgo_MF_sig)
+
+
+#Time point 3
+T3_enrichgo_MF <- enrichGO(T3_sig_prot, OrgDb = "org.Hs.eg.db", ont = "MF", universe = background$EntrezGeneID, pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE)
+T3_enrichgo_MF <- mutate(T3_enrichgo_MF, richFactor = Count / as.numeric(sub("/\\d+", "", BgRatio))) 
+T3_enrichgo_MF_res <- T3_enrichgo_MF@result
+write_xlsx(T3_enrichgo_MF_res, path = "../Enrichment_LGA/T3_MF_DE.xlsx",
+           col_names = TRUE)
+T3_enrichgo_MF_sig <- T3_enrichgo_MF_res %>%
+  filter(p.adjust < 0.05)
+dim(T3_enrichgo_MF_sig)
+
+
+#All time points
+#Biological processes
+T1T2T3_enrichgo_MF <- enrichGO(T1T2T3_sig_prot, OrgDb = "org.Hs.eg.db", ont = "MF", universe = background$EntrezGeneID, pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1, readable = TRUE)
+T1T2T3_enrichgo_MF <- mutate(T1T2T3_enrichgo_MF, richFactor = Count / as.numeric(sub("/\\d+", "", BgRatio))) 
+T1T2T3_enrichgo_MF_res <- T1T2T3_enrichgo_MF@result
+write_xlsx(T1T2T3_enrichgo_MF_res, path = "../Enrichment_LGA/T1T2T3_MF_DE.xlsx",
+           col_names = TRUE)
+T1T2T3_enrichgo_MF_sig <- T1T2T3_enrichgo_MF_res %>%
+  filter(p.adjust < 0.2)
+dim(T1T2T3_enrichgo_MF_sig)
+
+
+
+
+# ORA of KEGG  ------------------------------------------------------------
+#KEGG pathway does not work. There is something wrong with the database connection
+#I found this: https://github.com/YuLab-SMU/clusterProfiler/issues/305
+#And tried: 
+getOption("clusterProfiler.download.method")
+install.packages("R.utils")
+R.utils::setOption("clusterProfiler.download.method","auto")
+#It worked!
+
+#Time point 1
+bitr_kegg(T1_sig_prot, fromType = "kegg", toType = "Path", organism = "hsa") 
+T1_enrich_KEGG <- enrichKEGG(T1_sig_prot, organism = "hsa", universe = background$EntrezGeneID, pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1)
+T1_enrich_KEGG <- mutate(T1_enrich_KEGG, richFactor = Count / as.numeric(sub("/\\d+", "", BgRatio))) 
+T1_enrich_KEGG_res <- T1_enrich_KEGG@result
+write_xlsx(T1_enrich_KEGG_res, path = "../Scripts_without_PE/Enrichment_Groups/Adjust_BMI_nulli/T1_KEGG_DE.xlsx",
+           col_names = TRUE)
+T1_enrich_KEGG_sig <- T1_enrich_KEGG_res %>%
+  filter(p.adjust < 0.25)
+dim(T1_enrich_KEGG_sig)
+
+#Plot the results in a dotplot
+T1_dotplot_KEGG <- dotplot(T1_enrich_KEGG, x = "richFactor", showCategory = 30,
+                         title = "Visit 1, KEGG") +
+  scale_y_discrete(labels=function(x) str_wrap(x, width=80)) #Adjusts the length of the labels on y-axis
+
+ggsave(filename= "T1_KEGG_dotplot.png",
+       plot = T1_dotplot_KEGG,
+       device = "png",
+       path = "../Scripts_without_PE/Enrichment_Groups/Adjust_BMI_nulli",
+       width = 25,
+       height = 30,
+       units = "cm")
+
+bitr_kegg(T1_sig_prot, fromType = "kegg", toType = "Module", organism = "hsa") #No genes map
+T1_enrich_mKEGG <- enrichMKEGG(T1_sig_prot, organism = "hsa", universe = background$EntrezGeneID, pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1)
+T1_enrich_mKEGG <- mutate(T1_enrich_mKEGG, richFactor = Count / as.numeric(sub("/\\d+", "", BgRatio))) 
+T1_enrich_mKEGG_res <- T1_enrich_mKEGG@result
+write_xlsx(T1_enrich_mKEGG_res, path = "../Scripts_without_PE/Enrichment_Groups/Adjust_BMI_nulli/T1_mKEGG_DE.xlsx",
+           col_names = TRUE)
+T1_enrich_mKEGG_sig <- T1_enrich_mKEGG_res %>%
+  filter(p.adjust < 0.25)
+dim(T1_enrich_mKEGG_sig)
+
+#Plot the results in a dotplot
+T1_dotplot_mKEGG <- dotplot(T1_enrich_mKEGG, x = "richFactor", showCategory = 2,
+                           title = "Visit 1, mKEGG") +
+  scale_y_discrete(labels=function(x) str_wrap(x, width=80)) #Adjusts the length of the labels on y-axis
+
+ggsave(filename= "T1_mKEGG_dotplot.png",
+       plot = T1_dotplot_mKEGG,
+       device = "png",
+       path = "../Scripts_without_PE/Enrichment_Groups/Adjust_BMI_nulli",
+       width = 25,
+       height = 10,
+       units = "cm")
+
+
+
+#Time point 2
+bitr_kegg(T2_sig_prot, fromType = "kegg", toType = "Path", organism = "hsa") #No genes map
+T2_enrich_KEGG <- enrichKEGG(T2_sig_prot, organism = "hsa", universe = background$EntrezGeneID, pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1)
+T1_enrich_KEGG <- mutate(T1_enrich_KEGG, richFactor = Count / as.numeric(sub("/\\d+", "", BgRatio))) 
+T2_enrich_KEGG_res <- T2_enrich_KEGG@result
+write_xlsx(T2_enrich_KEGG_res, path = "../Scripts_without_PE/Enrichment_Groups/Adjust_BMI_nulli/T2_KEGG_DE.xlsx",
+           col_names = TRUE)
+T2_enrich_KEGG_sig <- T2_enrich_KEGG_res %>%
+  filter(p.adjust < 0.25)
+dim(T2_enrich_KEGG_sig)
+
+
+bitr_kegg(T2_sig_prot, fromType = "kegg", toType = "Module", organism = "hsa") #No genes map
+
+
+#Time point 3
+bitr_kegg(T3_sig_prot, fromType = "kegg", toType = "Path", organism = "hsa") #No genes map
+T3_enrich_KEGG <- enrichKEGG(T3_sig_prot, organism = "hsa", universe = background$EntrezGeneID, pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1)
+T3_enrich_KEGG <- mutate(T3_enrich_KEGG, richFactor = Count / as.numeric(sub("/\\d+", "", BgRatio))) 
+T3_enrich_KEGG_res <- T3_enrich_KEGG@result
+write_xlsx(T3_enrich_KEGG_res, path = "../Scripts_without_PE/Enrichment_Groups/Adjust_BMI_nulli/T3_KEGG_DE.xlsx",
+           col_names = TRUE)
+T3_enrich_KEGG_sig <- T3_enrich_KEGG_res %>%
+  filter(p.adjust < 0.25)
+dim(T3_enrich_KEGG_sig)
+
+
+bitr_kegg(T3_sig_prot, fromType = "kegg", toType = "Module", organism = "hsa") #A few genes map
+T3_enrich_MKEGG <- enrichMKEGG(T3_sig_prot, organism = "hsa", universe = background$EntrezGeneID, pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1)
+T3_enrich_MKEGG <- mutate(T3_enrich_MKEGG, richFactor = Count / as.numeric(sub("/\\d+", "", BgRatio))) 
+T3_enrich_MKEGG_res <- T3_enrich_MKEGG@result
+write_xlsx(T3_enrich_MKEGG_res, path = "../Scripts_without_PE/Enrichment_Groups/Adjust_BMI_nulli/T3_MKEGG_DE.xlsx",
+           col_names = TRUE)
+T3_enrich_MKEGG_sig <- T3_enrich_MKEGG_res %>%
+  filter(p.adjust < 0.05)
+dim(T3_enrich_MKEGG_sig)
+
+#Plot the results in a dotplot
+T3_dotplot_MKEGG <- dotplot(T3_enrich_MKEGG, x = "richFactor", showCategory = 2,
+                            title = "Visit 3, MKEGG") +
+  scale_y_discrete(labels=function(x) str_wrap(x, width=80)) #Adjusts the length of the labels on y-axis
+
+ggsave(filename= "T3_MKEGG_dotplot.png",
+       plot = T3_dotplot_MKEGG,
+       device = "png",
+       path = "../Scripts_without_PE/Enrichment_Groups/Adjust_BMI_nulli",
+       width = 25,
+       height = 10,
+       units = "cm")
+
+#All time points
+bitr_kegg(T1T2T3_sig_prot, fromType = "kegg", toType = "Path", organism = "hsa") #No genes map
+T1T2T3_enrich_KEGG <- enrichKEGG(T1T2T3_sig_prot, organism = "hsa", universe = background$EntrezGeneID, pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1)
+T1T2T3_enrich_KEGG <- mutate(T1T2T3_enrich_KEGG, richFactor = Count / as.numeric(sub("/\\d+", "", BgRatio))) 
+T1T2T3_enrich_KEGG_res <- T1T2T3_enrich_KEGG@result
+write_xlsx(T1T2T3_enrich_KEGG_res, path = "../Scripts_without_PE/Enrichment_Groups/Adjust_BMI_nulli/T1T2T3_KEGG_DE.xlsx",
+           col_names = TRUE)
+T1T2T3_enrich_KEGG_sig <- T1T2T3_enrich_KEGG_res %>%
+  filter(p.adjust < 0.05)
+dim(T1T2T3_enrich_KEGG_sig)
+
+#Plot the results in a dotplot
+T1T2T3_dotplot_KEGG <- dotplot(T1T2T3_enrich_KEGG, x = "richFactor", showCategory = 1,
+                            title = "All visits, KEGG") +
+  scale_y_discrete(labels=function(x) str_wrap(x, width=80)) #Adjusts the length of the labels on y-axis
+
+ggsave(filename= "T1T2T3_KEGG_dotplot.png",
+       plot = T1T2T3_dotplot_KEGG,
+       device = "png",
+       path = "../Scripts_without_PE/Enrichment_Groups/Adjust_BMI_nulli",
+       width = 25,
+       height = 10,
+       units = "cm")
+
+
+bitr_kegg(T1T2T3_sig_prot, fromType = "kegg", toType = "Module", organism = "hsa") #A few genes map
+T1T2T3_enrich_MKEGG <- enrichMKEGG(T1T2T3_sig_prot, organism = "hsa", universe = background$EntrezGeneID, pAdjustMethod = "BH", pvalueCutoff = 1, qvalueCutoff = 1)
+T1T2T3_enrich_MKEGG <- mutate(T1T2T3_enrich_MKEGG, richFactor = Count / as.numeric(sub("/\\d+", "", BgRatio))) 
+T1T2T3_enrich_MKEGG_res <- T1T2T3_enrich_MKEGG@result
+write_xlsx(T1T2T3_enrich_MKEGG_res, path = "../Scripts_without_PE/Enrichment_Groups/Adjust_BMI_nulli/T1T2T3_MKEGG_DE.xlsx",
+           col_names = TRUE)
+T1T2T3_enrich_MKEGG_sig <- T1T2T3_enrich_MKEGG_res %>%
+  filter(p.adjust < 0.25)
+dim(T1T2T3_enrich_MKEGG_sig)
+
+#Plot the results in a dotplot
+T1T2T3_dotplot_MKEGG <- dotplot(T1T2T3_enrich_MKEGG, x = "richFactor", showCategory = 2,
+                            title = "All visits, MKEGG") +
+  scale_y_discrete(labels=function(x) str_wrap(x, width=80)) #Adjusts the length of the labels on y-axis
+
+ggsave(filename= "T1T2T3_MKEGG_dotplot.png",
+       plot = T1T2T3_dotplot_MKEGG,
+       device = "png",
+       path = "../Scripts_without_PE/Enrichment_Groups/Adjust_BMI_nulli",
+       width = 25,
+       height = 10,
+       units = "cm")
+
+
+# ORA against the Reactome patway database ---------------------------------
+#Do the ORA
+T1_enrichRA <- enrichPathway(T1_sig_prot, organism = "human", 
+                             pvalueCutoff = 1, pAdjustMethod = "BH", qvalueCutoff = 1, 
+                             universe = background$EntrezGeneID) 
+T1_enrichRA <- mutate(T1_enrichRA, richFactor = Count / as.numeric(sub("/\\d+", "", BgRatio))) 
+T1_enrichRA_res <- T1_enrichRA@result
+write_xlsx(T1_enrichRA_res, path = "../Enrichment_LGA/T1_RA_DE.xlsx",
+           col_names = TRUE)
+T1_enrichRA_sig <- T1_enrichRA_res %>%
+  filter(p.adjust < 0.2)
+dim(T1_enrichRA_sig)
+
+T2_enrichRA <- enrichPathway(T2_sig_prot, organism = "human", 
+                             pvalueCutoff = 1, pAdjustMethod = "BH", qvalueCutoff = 1, 
+                             universe = background$EntrezGeneID) 
+T2_enrichRA <- mutate(T2_enrichRA, richFactor = Count / as.numeric(sub("/\\d+", "", BgRatio))) 
+T2_enrichRA_res <- T2_enrichRA@result
+write_xlsx(T2_enrichRA_res, path = "../Enrichment_LGA/T2_RA_DE.xlsx",
+           col_names = TRUE)
+T2_enrichRA_sig <- T2_enrichRA_res %>%
+  filter(p.adjust < 0.2)
+dim(T2_enrichRA_sig)
+
+T3_enrichRA <- enrichPathway(T3_sig_prot, organism = "human", 
+                             pvalueCutoff = 1, pAdjustMethod = "BH", qvalueCutoff = 1, 
+                             universe = background$EntrezGeneID) 
+T3_enrichRA <- mutate(T3_enrichRA, richFactor = Count / as.numeric(sub("/\\d+", "", BgRatio))) 
+T3_enrichRA_res <- T3_enrichRA@result
+write_xlsx(T3_enrichRA_res, path = "../Enrichment_LGA/T3_RA_res_DE.xlsx",
+           col_names = TRUE)
+T3_enrichRA_sig <- T3_enrichRA_res %>%
+  filter(p.adjust < 0.2)
+dim(T3_enrichRA_sig)
+
+#All time points
+T1T2T3_enrichRA <- enrichPathway(T1T2T3_sig_prot, organism = "human", 
+                             pvalueCutoff = 1, pAdjustMethod = "BH", qvalueCutoff = 1, 
+                             universe = background$EntrezGeneID) 
+T1T2T3_enrichRA <- mutate(T1T2T3_enrichRA, richFactor = Count / as.numeric(sub("/\\d+", "", BgRatio))) 
+T1T2T3_enrichRA_res <- T1T2T3_enrichRA@result
+write_xlsx(T1T2T3_enrichRA_res, path = "../Enrichment_LGA/T1T2T3_RA_res_DE.xlsx",
+           col_names = TRUE)
+T1T2T3_enrichRA_sig <- T1T2T3_enrichRA_res %>%
+  filter(p.adjust < 0.2)
+dim(T1T2T3_enrichRA_sig)
+
+
+
+
+
+
