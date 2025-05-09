@@ -1,0 +1,95 @@
+library(tidyverse)
+library(readxl)
+library(writexl)
+
+
+
+# Supplementary table S1, Limma results LGA vs AGA ------------------------
+
+T1_LGA_AGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T1_LGA_AGA_adj_nulli_bmi.xlsx")
+T2_LGA_AGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T2_LGA_AGA_adj_nulli_bmi.xlsx")
+T3_LGA_AGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T3_LGA_AGA_adj_nulli_bmi.xlsx")
+
+
+T1_LGA_AGA <- T1_LGA_AGA %>%
+  select(AptName, SomaId, TargetFullName, EntrezGeneSymbol, logFC, P.Value, adj.P.Val) %>%
+  rename("logFC, Visit 1" = logFC) %>%
+  rename("p-value, Visit 1" = P.Value) %>%
+  rename("q-value, Visit 1" = adj.P.Val)
+
+T2_LGA_AGA <- T2_LGA_AGA %>%
+  select(AptName, logFC, P.Value, adj.P.Val) %>%
+  rename("logFC, Visit 2" = logFC) %>%
+  rename("p-value, Visit 2" = P.Value) %>%
+  rename("q-value, Visit 2" = adj.P.Val)
+
+T3_LGA_AGA <- T3_LGA_AGA %>%
+  select(AptName, logFC, P.Value, adj.P.Val) %>%
+  rename("logFC, Visit 3" = logFC) %>%
+  rename("p-value, Visit 3" = P.Value) %>%
+  rename("q-value, Visit 3" = adj.P.Val)
+
+LGA_AGA_T1T2T3 <- merge(T1_LGA_AGA, T2_LGA_AGA, by = "AptName")
+LGA_AGA_T1T2T3 <- merge(LGA_AGA_T1T2T3, T3_LGA_AGA, by = "AptName")
+
+write_xlsx(LGA_AGA_T1T2T3, path = "../Limma_groups/Adjust_BMI_nulli/Supplementary_tableS1.xlsx",
+           col_names = TRUE)
+
+
+# Supplementary table S2, Limma results SGA vs AGA ------------------------
+
+
+T1_SGA_AGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T1_SGA_AGA_adj_nulli_bmi.xlsx")
+T2_SGA_AGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T2_SGA_AGA_adj_nulli_bmi.xlsx")
+T3_SGA_AGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T3_SGA_AGA_adj_nulli_bmi.xlsx")
+
+
+T1_SGA_AGA <- T1_SGA_AGA %>%
+  select(AptName, SomaId, TargetFullName, EntrezGeneSymbol, logFC, P.Value, adj.P.Val) %>%
+  rename("logFC, Visit 1" = logFC) %>%
+  rename("p-value, Visit 1" = P.Value) %>%
+  rename("q-value, Visit 1" = adj.P.Val)
+
+T2_SGA_AGA <- T2_SGA_AGA %>%
+  select(AptName, logFC, P.Value, adj.P.Val) %>%
+  rename("logFC, Visit 2" = logFC) %>%
+  rename("p-value, Visit 2" = P.Value) %>%
+  rename("q-value, Visit 2" = adj.P.Val)
+
+T3_SGA_AGA <- T3_SGA_AGA %>%
+  select(AptName, logFC, P.Value, adj.P.Val) %>%
+  rename("logFC, Visit 3" = logFC) %>%
+  rename("p-value, Visit 3" = P.Value) %>%
+  rename("q-value, Visit 3" = adj.P.Val)
+
+SGA_AGA_T1T2T3 <- merge(T1_SGA_AGA, T2_SGA_AGA, by = "AptName")
+SGA_AGA_T1T2T3 <- merge(SGA_AGA_T1T2T3, T3_SGA_AGA, by = "AptName")
+
+write_xlsx(SGA_AGA_T1T2T3, path = "../Limma_groups/Adjust_BMI_nulli/Supplementary_tableS2.xlsx",
+           col_names = TRUE)
+
+# Supplementary table S3, Linear regression ------------------------
+T1 <- read_excel("../Limma_continous/T1_res_adj_nulli_bmi.xlsx")
+T2 <- read_excel("..//Limma_continous/T2_res_adj_nulli_bmi.xlsx")
+T3 <- read_excel("..//Limma_continous/T3_res_adj_nulli_bmi.xlsx")
+
+T1 <- T1 %>%
+  select(AptName, SomaId, TargetFullName, EntrezGeneSymbol, P.Value, adj.P.Val) %>%
+  rename("p-value, Visit 1" = P.Value) %>%
+  rename("q-value, Visit 1" = adj.P.Val)
+
+T2 <- T2 %>%
+  select(AptName, P.Value, adj.P.Val) %>%
+  rename("p-value, Visit 2" = P.Value) %>%
+  rename("q-value, Visit 2" = adj.P.Val)
+
+T3 <- T3 %>%
+  select(AptName, P.Value, adj.P.Val) %>%
+  rename("p-value, Visit 3" = P.Value) %>%
+  rename("q-value, Visit 3" = adj.P.Val)
+
+T1T2T3 <- merge(T1, T2, by = "AptName")
+T1T2T3 <- merge(T1T2T3, T3, by = "AptName")
+
+write_xlsx(T1T2T3, path = "../Limma_continous/Supplementary_tableS3.xlsx",
+           col_names = TRUE)
