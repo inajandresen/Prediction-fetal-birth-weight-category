@@ -1,0 +1,165 @@
+library(tidyverse)
+library(writexl)
+library(readxl)
+library(Biobase)
+library(limma)
+library(ggVennDiagram)
+library(pcaMethods)
+library(scales)
+library(gridExtra)
+library(ggforce)
+library(ggrepel)
+library(ggvenn)
+
+
+# Limma, adjusting for BMI age and nulliparity ------------------------------------------------------------
+
+#Time point 1
+load("../Data/MOM_exprset_STORK_SGA_LGA.RData")
+T1_MoM_exprset_STORK_LGA_SGA <- MoM_exprset_STORK_LGA_SGA[, MoM_exprset_STORK_LGA_SGA$TimePoint %in% "1"]
+T1_samp <- pData(T1_MoM_exprset_STORK_LGA_SGA)
+
+T1_design_adj <-model.matrix(~`Birthweight z-score`+BMI+Nulliparity, T1_samp)
+
+T1_fit_adj <- lmFit(T1_MoM_exprset_STORK_LGA_SGA, design = T1_design_adj)
+T1_efit_adj <- eBayes(T1_fit_adj)
+save(T1_fit_adj, T1_design_adj, T1_efit_adj, file = "../Limma_continous/efit_T1_adj_nulli_bmi.RData")
+
+
+T1_res_adj <- topTable(T1_efit_adj, number = "all", adjust.method="BH")
+T1_res_adj <- T1_res_adj %>%
+  dplyr::select(AptName, SomaId, TargetFullName, Target, UniProt, EntrezGeneID, EntrezGeneSymbol, X.Birthweight.z.score.,
+                BMI, Nulliparity, AveExpr, F, P.Value, adj.P.Val)
+T1_res_adj_0.05 <- T1_res_adj %>%
+  filter(adj.P.Val < 0.05)
+dim(T1_res_adj_0.05)
+
+write_xlsx(T1_res_adj, path = "../Limma_continous/T1_res_adj_nulli_bmi.xlsx",
+           col_names = TRUE)
+
+
+
+#Time point 2
+load("../Data/MOM_exprset_STORK_SGA_LGA.RData")
+T2_MoM_exprset_STORK_LGA_SGA <- MoM_exprset_STORK_LGA_SGA[, MoM_exprset_STORK_LGA_SGA$TimePoint %in% "2"]
+T2_samp <- pData(T2_MoM_exprset_STORK_LGA_SGA)
+
+T2_design_adj <-model.matrix(~`Birthweight z-score`+BMI+Nulliparity, T2_samp)
+
+T2_fit_adj <- lmFit(T2_MoM_exprset_STORK_LGA_SGA, design = T2_design_adj)
+T2_efit_adj <- eBayes(T2_fit_adj)
+save(T2_fit_adj, T2_design_adj, T2_efit_adj, file = "../Scripts_without_PE/Limma_continous/efit_T2_adj_nulli_bmi.RData")
+
+
+T2_res_adj <- topTable(T2_efit_adj, number = "all", adjust.method="BH")
+T2_res_adj <- T2_res_adj %>%
+  dplyr::select(AptName, SomaId, TargetFullName, Target, UniProt, EntrezGeneID, EntrezGeneSymbol, X.Birthweight.z.score.,
+                BMI, Nulliparity, AveExpr, F, P.Value, adj.P.Val)
+T2_res_adj_0.05 <- T2_res_adj %>%
+  filter(adj.P.Val < 0.05)
+dim(T2_res_adj_0.05)
+
+
+write_xlsx(T2_res_adj, path = "../Limma_continous/T2_res_adj_nulli_bmi.xlsx",
+           col_names = TRUE)
+
+#Time point 3
+load("../Data/MOM_exprset_STORK_SGA_LGA.RData")
+T3_MoM_exprset_STORK_LGA_SGA <- MoM_exprset_STORK_LGA_SGA[, MoM_exprset_STORK_LGA_SGA$TimePoint %in% "3"]
+T3_samp <- pData(T3_MoM_exprset_STORK_LGA_SGA)
+
+T3_design_adj <-model.matrix(~`Birthweight z-score`+BMI+Nulliparity, T3_samp)
+
+T3_fit_adj <- lmFit(T3_MoM_exprset_STORK_LGA_SGA, design = T3_design_adj)
+T3_efit_adj <- eBayes(T3_fit_adj)
+save(T3_fit_adj, T3_design_adj, T3_efit_adj, file = "../Limma_continous/efit_T3_adj_nulli_bmi.RData")
+
+
+T3_res_adj <- topTable(T3_efit_adj, number = "all", adjust.method="BH")
+T3_res_adj <- T3_res_adj %>%
+  dplyr::select(AptName, SomaId, TargetFullName, Target, UniProt, EntrezGeneID, EntrezGeneSymbol, X.Birthweight.z.score.,
+                BMI, Nulliparity, AveExpr, F, P.Value, adj.P.Val)
+T3_res_adj_0.05 <- T3_res_adj %>%
+  filter(adj.P.Val < 0.05)
+dim(T3_res_adj_0.05)
+
+
+write_xlsx(T3_res_adj, path = "../Limma_continous/T3_res_adj_nulli_bmi.xlsx",
+           col_names = TRUE)
+
+
+
+  
+# Limma, no adjustment ------------------------------------------------------------
+
+#Time point 1
+load("../Data/MOM_exprset_STORK_SGA_LGA.RData")
+T1_MoM_exprset_STORK_LGA_SGA <- MoM_exprset_STORK_LGA_SGA[, MoM_exprset_STORK_LGA_SGA$TimePoint %in% "1"]
+T1_samp <- pData(T1_MoM_exprset_STORK_LGA_SGA)
+
+T1_design_noadj <- model.matrix(~`Birthweight z-score`, T1_samp)
+
+T1_fit_noadj <- lmFit(T1_MoM_exprset_STORK_LGA_SGA, design = T1_design_noadj)
+T1_efit_noadj <- eBayes(T1_fit_noadj)
+save(T1_fit_noadj, T1_design_noadj, T1_efit_noadj, file = "../Limma_continous/No_adjustments/efit_T1_noadj.RData")
+
+T1_no_adj_res <- topTable(T1_efit_noadj, number = "all", adjust.method="BH")
+T1_no_adj_res <- T1_no_adj_res %>%
+  dplyr::select(AptName, SomaId, TargetFullName, Target, UniProt, EntrezGeneID, EntrezGeneSymbol, logFC, AveExpr, t, P.Value, adj.P.Val, B)
+T1_no_adj_res_0.05 <- T1_no_adj_res %>%
+  filter(adj.P.Val < 0.05)
+dim(T1_no_adj_res_0.05)
+ 
+
+write_xlsx(T1_no_adj_res, path = "../Limma_continous/No_adjustments/T1_res_noadj.xlsx",
+           col_names = TRUE)
+
+
+#Time point 2
+load("../Data/MOM_exprset_STORK_SGA_LGA.RData")
+T2_MoM_exprset_STORK_LGA_SGA <- MoM_exprset_STORK_LGA_SGA[, MoM_exprset_STORK_LGA_SGA$TimePoint %in% "2"]
+T2_samp <- pData(T2_MoM_exprset_STORK_LGA_SGA)
+
+T2_design_noadj <- model.matrix(~`Birthweight z-score`, T2_samp)
+
+T2_fit_noadj <- lmFit(T2_MoM_exprset_STORK_LGA_SGA, design = T2_design_noadj)
+T2_efit_noadj <- eBayes(T2_fit_noadj)
+save(T2_fit_noadj, T2_design_noadj, T2_efit_noadj, file = "../Limma_continous/No_adjustments/efit_T2_noadj.RData")
+
+T2_no_adj_res <- topTable(T2_efit_noadj, number = "all", adjust.method="BH")
+T2_no_adj_res <- T2_no_adj_res %>%
+  dplyr::select(AptName, SomaId, TargetFullName, Target, UniProt, EntrezGeneID, EntrezGeneSymbol, logFC, AveExpr, t, P.Value, adj.P.Val, B)
+T2_no_adj_res_0.05 <- T2_no_adj_res %>%
+  filter(adj.P.Val < 0.05)
+dim(T2_no_adj_res_0.05)
+
+
+write_xlsx(T2_no_adj_res, path = "../Limma_continous/No_adjustments/T2_res_noadj.xlsx",
+           col_names = TRUE)
+
+
+#Time point 3
+load("../Data/MOM_exprset_STORK_SGA_LGA.RData")
+T3_MoM_exprset_STORK_LGA_SGA <- MoM_exprset_STORK_LGA_SGA[, MoM_exprset_STORK_LGA_SGA$TimePoint %in% "3"]
+T3_samp <- pData(T3_MoM_exprset_STORK_LGA_SGA)
+
+T3_design_noadj <- model.matrix(~`Birthweight z-score`,T3_samp)
+
+T3_fit_noadj <- lmFit(T3_MoM_exprset_STORK_LGA_SGA, design = T3_design_noadj)
+T3_efit_noadj <- eBayes(T3_fit_noadj)
+save(T3_fit_noadj, T3_design_noadj, T3_efit_noadj, file = "../Limma_continous/No_adjustments/efit_T3_noadj.RData")
+
+T3_no_adj_res <- topTable(T3_efit_noadj, number = "all", adjust.method="BH")
+T3_no_adj_res <- T3_no_adj_res %>%
+  dplyr::select(AptName, SomaId, TargetFullName, Target, UniProt, EntrezGeneID, EntrezGeneSymbol, logFC, AveExpr, t, P.Value, adj.P.Val, B)
+T3_no_adj_res_0.05 <- T3_no_adj_res %>%
+  filter(adj.P.Val < 0.05)
+dim(T3_no_adj_res_0.05)
+
+
+write_xlsx(T3_no_adj_res, path = "../Limma_continous/No_adjustments/T3_res_noadj.xlsx",
+           col_names = TRUE)
+
+
+
+
