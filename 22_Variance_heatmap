@@ -1,0 +1,203 @@
+library(tidyverse)
+library(readxl)
+library(pheatmap)
+
+
+# Load interesting proteins  ----------------------------------------------
+#DE analysis 
+T1_LGAvsAGA <- read_xlsx("../Limma_groups/Adjust_BMI_nulli/T1_LGA_AGA_adj_nulli_bmi.xlsx",
+                         col_names = TRUE)
+T1_LGAvsAGA_sig <- T1_LGAvsAGA %>%
+  filter(adj.P.Val < 0.05)
+
+T2_LGAvsAGA <- read_xlsx("../Limma_groups/Adjust_BMI_nulli/T2_LGA_AGA_adj_nulli_bmi.xlsx",
+                         col_names = TRUE)
+T2_LGAvsAGA_sig <- T2_LGAvsAGA %>%
+  filter(adj.P.Val < 0.05)
+
+T3_LGAvsAGA <- read_xlsx("../Limma_groups/Adjust_BMI_nulli/T3_LGA_AGA_adj_nulli_bmi.xlsx",
+                         col_names = TRUE)
+T3_LGAvsAGA_sig <- T3_LGAvsAGA %>%
+  filter(adj.P.Val < 0.05)
+
+#SGA vs AGA
+T1_SGAvsAGA <- read_xlsx("../Limma_groups/Adjust_BMI_nulli/T1_SGA_AGA_adj_nulli_bmi.xlsx",
+                         col_names = TRUE)
+T1_SGAvsAGA_sig <- T1_SGAvsAGA %>%
+  filter(adj.P.Val < 0.05)
+
+T2_SGAvsAGA <- read_xlsx("../Limma_groups/Adjust_BMI_nulli/T2_SGA_AGA_adj_nulli_bmi.xlsx",
+                         col_names = TRUE)
+T2_SGAvsAGA_sig <- T2_SGAvsAGA %>%
+  filter(adj.P.Val < 0.05)
+
+T3_SGAvsAGA <- read_xlsx("../Limma_groups/Adjust_BMI_nulli/T3_SGA_AGA_adj_nulli_bmi.xlsx",
+                         col_names = TRUE)
+T3_SGAvsAGA_sig <- T3_SGAvsAGA %>%
+  filter(adj.P.Val < 0.05)
+
+Sig_proteins_DE <- c(T1_LGAvsAGA_sig$AptName, T2_LGAvsAGA_sig$AptName, T3_LGAvsAGA_sig$AptName, T1_SGAvsAGA_sig$AptName, T2_SGAvsAGA_sig$AptName, T3_SGAvsAGA_sig$AptName)
+Sig_proteins_DE <- unique(Sig_proteins_DE)
+
+rm(T1_LGAvsAGA, T1_LGAvsAGA_sig, T2_LGAvsAGA, T2_LGAvsAGA_sig, T3_LGAvsAGA, T3_LGAvsAGA_sig,
+   T1_SGAvsAGA, T1_SGAvsAGA_sig, T2_SGAvsAGA, T2_SGAvsAGA_sig, T3_SGAvsAGA, T3_SGAvsAGA_sig)
+
+
+# Format dataset ----------------------------------------------------------
+load("../Data/MOM_exprset_STORK_SGA_LGA.RData")
+
+#Filter on interesting proteins 
+MoM_exprset_STORK_LGA_SGA <- MoM_exprset_STORK_LGA_SGA[featureNames(MoM_exprset_STORK_LGA_SGA) %in% Sig_proteins_DE ,] 
+
+#Seperate time points
+T1_MoM_exprset_STORK_LGA_SGA <- MoM_exprset_STORK_LGA_SGA[, MoM_exprset_STORK_LGA_SGA$TimePoint %in% "1"]
+T2_MoM_exprset_STORK_LGA_SGA <- MoM_exprset_STORK_LGA_SGA[, MoM_exprset_STORK_LGA_SGA$TimePoint %in% "2"]
+T3_MoM_exprset_STORK_LGA_SGA <- MoM_exprset_STORK_LGA_SGA[, MoM_exprset_STORK_LGA_SGA$TimePoint %in% "3"]
+
+#Separate birth weight categories
+T1_SGA_eset <- T1_MoM_exprset_STORK_LGA_SGA[, T1_MoM_exprset_STORK_LGA_SGA$Bwkat %in% "SGA"]
+T2_SGA_eset <- T2_MoM_exprset_STORK_LGA_SGA[, T2_MoM_exprset_STORK_LGA_SGA$Bwkat %in% "SGA"]
+T3_SGA_eset <- T3_MoM_exprset_STORK_LGA_SGA[, T3_MoM_exprset_STORK_LGA_SGA$Bwkat %in% "SGA"]
+
+T1_AGA_eset <- T1_MoM_exprset_STORK_LGA_SGA[, T1_MoM_exprset_STORK_LGA_SGA$Bwkat %in% "AGA"]
+T2_AGA_eset <- T2_MoM_exprset_STORK_LGA_SGA[, T2_MoM_exprset_STORK_LGA_SGA$Bwkat %in% "AGA"]
+T3_AGA_eset <- T3_MoM_exprset_STORK_LGA_SGA[, T3_MoM_exprset_STORK_LGA_SGA$Bwkat %in% "AGA"]
+
+T1_LGA_eset <- T1_MoM_exprset_STORK_LGA_SGA[, T1_MoM_exprset_STORK_LGA_SGA$Bwkat %in% "LGA"]
+T2_LGA_eset <- T2_MoM_exprset_STORK_LGA_SGA[, T2_MoM_exprset_STORK_LGA_SGA$Bwkat %in% "LGA"]
+T3_LGA_eset <- T3_MoM_exprset_STORK_LGA_SGA[, T3_MoM_exprset_STORK_LGA_SGA$Bwkat %in% "LGA"]
+
+
+#Calculate the variance 
+T1_SGA_MOM <- exprs(T1_SGA_eset)
+T1_SGA_MOM <- t(T1_SGA_MOM) %>%
+  as.data.frame()
+T1_SGA_var <- as.data.frame(sapply(T1_SGA_MOM, var))
+colnames(T1_SGA_var) <- "Visit 1 (SGA)"
+T1_SGA_var <- T1_SGA_var %>%
+  rownames_to_column(var = "AptName")
+
+T2_SGA_MOM <- exprs(T2_SGA_eset)
+T2_SGA_MOM <- t(T2_SGA_MOM) %>%
+  as.data.frame()
+T2_SGA_var <- as.data.frame(sapply(T2_SGA_MOM, var))
+colnames(T2_SGA_var) <- "Visit 2 (SGA)"
+T2_SGA_var <- T2_SGA_var %>%
+  rownames_to_column(var = "AptName")
+
+T3_SGA_MOM <- exprs(T3_SGA_eset)
+T3_SGA_MOM <- t(T3_SGA_MOM) %>%
+  as.data.frame()
+T3_SGA_var <- as.data.frame(sapply(T3_SGA_MOM, var))
+colnames(T3_SGA_var) <- "Visit 3 (SGA)"
+T3_SGA_var <- T3_SGA_var %>%
+  rownames_to_column(var = "AptName")
+
+T1_AGA_MOM <- exprs(T1_AGA_eset)
+T1_AGA_MOM <- t(T1_AGA_MOM) %>%
+  as.data.frame()
+T1_AGA_var <- as.data.frame(sapply(T1_AGA_MOM, var))
+colnames(T1_AGA_var) <- "Visit 1 (AGA)"
+T1_AGA_var <- T1_AGA_var %>%
+  rownames_to_column(var = "AptName")
+
+T2_AGA_MOM <- exprs(T2_AGA_eset)
+T2_AGA_MOM <- t(T2_AGA_MOM) %>%
+  as.data.frame()
+T2_AGA_var <- as.data.frame(sapply(T2_AGA_MOM, var))
+colnames(T2_AGA_var) <- "Visit 2 (AGA)"
+T2_AGA_var <- T2_AGA_var %>%
+  rownames_to_column(var = "AptName")
+
+T3_AGA_MOM <- exprs(T3_AGA_eset)
+T3_AGA_MOM <- t(T3_AGA_MOM) %>%
+  as.data.frame()
+T3_AGA_var <- as.data.frame(sapply(T3_AGA_MOM, var))
+colnames(T3_AGA_var) <- "Visit 3 (AGA)"
+T3_AGA_var <- T3_AGA_var %>%
+  rownames_to_column(var = "AptName")
+
+T1_LGA_MOM <- exprs(T1_LGA_eset)
+T1_LGA_MOM <- t(T1_LGA_MOM) %>%
+  as.data.frame()
+T1_LGA_var <- as.data.frame(sapply(T1_LGA_MOM, var))
+colnames(T1_LGA_var) <- "Visit 1 (LGA)"
+T1_LGA_var <- T1_LGA_var %>%
+  rownames_to_column(var = "AptName")
+
+T2_LGA_MOM <- exprs(T2_LGA_eset)
+T2_LGA_MOM <- t(T2_LGA_MOM) %>%
+  as.data.frame()
+T2_LGA_var <- as.data.frame(sapply(T2_LGA_MOM, var))
+colnames(T2_LGA_var) <- "Visit 2 (LGA)"
+T2_LGA_var <- T2_LGA_var %>%
+  rownames_to_column(var = "AptName")
+
+T3_LGA_MOM <- exprs(T3_LGA_eset)
+T3_LGA_MOM <- t(T3_LGA_MOM) %>%
+  as.data.frame()
+T3_LGA_var <- as.data.frame(sapply(T3_LGA_MOM, var))
+colnames(T3_LGA_var) <- "Visit 3 (LGA)"
+T3_LGA_var <- T3_LGA_var %>%
+  rownames_to_column(var = "AptName")
+
+
+#Merge datasets
+Merged_var <- merge(T1_SGA_var, T2_SGA_var, by = "AptName")
+Merged_var <- merge(Merged_var, T3_SGA_var, by = "AptName")
+Merged_var <- merge(Merged_var, T1_AGA_var, by = "AptName")
+Merged_var <- merge(Merged_var, T2_AGA_var, by = "AptName")
+Merged_var <- merge(Merged_var, T3_AGA_var, by = "AptName")
+Merged_var <- merge(Merged_var, T1_LGA_var, by = "AptName")
+Merged_var <- merge(Merged_var, T2_LGA_var, by = "AptName")
+Merged_var <- merge(Merged_var, T3_LGA_var, by = "AptName")
+
+#Add target full name 
+prot <- fData(MoM_exprset_STORK_LGA_SGA)
+prot <- prot %>%
+  mutate(EntrezGeneSymbol2 = paste0("(", EntrezGeneSymbol,  ")"))
+prot$TargetFullName_EntrezGeneSymbol <- paste(prot$TargetFullName, prot$EntrezGeneSymbol2)
+prot <- prot %>%
+  select(AptName, TargetFullName_EntrezGeneSymbol)
+Merged_var <- merge(prot, Merged_var, by.y = "AptName")
+
+#Sort alphabetically
+Merged_var <- Merged_var[order(Merged_var$TargetFullName_EntrezGeneSymbol),]
+Merged_var <- Merged_var %>%
+  select(-AptName) %>%
+  remove_rownames() %>%
+  column_to_rownames(var = "TargetFullName_EntrezGeneSymbol")
+
+
+#Plot heatmap
+#Set value zero to be white color
+Breaks <- c(seq(min(Merged_var), 0, length.out=ceiling(100/2) + 1), 
+            seq(max(Merged_var)/100, max(Merged_var), length.out=floor(100/2)))
+
+
+heatmap_variance <- Merged_var %>%
+  pheatmap(border_color = NA,
+           breaks = Breaks,
+           clustering_method = "complete",
+           cluster_cols = FALSE,
+           cluster_rows = FALSE,
+           show_rownames = TRUE,
+           display_numbers = round(Merged_var,2),
+           #color = colorRampPalette(c("cornflowerblue", "white", "brown2"))(100),
+           fontsize_row = 12,
+           fontsize_col = 14,
+           treeheight_row = 0,
+           cellwidth = 30,
+           cellheight = 15,
+           annotation_legend = FALSE,
+           main = "")
+
+ggsave(filename= "Heatmap_variance.png",
+       plot = heatmap_variance,
+       device = "png",
+       path = "../Protein_variance/",
+       width = 35,
+       height = 85,
+       units = "cm")
+
+
