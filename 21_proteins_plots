@@ -1,0 +1,1536 @@
+library(tidyverse)
+library(readxl)
+library(gridExtra)
+library(ggvenn)
+library(ggpubr)
+library(reshape2)
+library(reshape)
+library(ggforce)
+library(Biobase)
+library(splines)
+library(mgcv)
+library(psych)
+
+# Extract list of proteins  -----------------------------------------------
+#DE analysis 
+T1_SGAvsAGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T1_SGA_AGA_adj_nulli_bmi.xlsx")
+T1_SGAvsAGA_sig <- T1_SGAvsAGA %>%
+  filter(adj.P.Val < 0.05) 
+
+T2_SGAvsAGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T2_SGA_AGA_adj_nulli_bmi.xlsx")
+T2_SGAvsAGA_sig <- T2_SGAvsAGA %>%
+  filter(adj.P.Val < 0.05)
+
+T3_SGAvsAGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T3_SGA_AGA_adj_nulli_bmi.xlsx")
+T3_SGAvsAGA_sig <- T3_SGAvsAGA %>%
+  filter(adj.P.Val < 0.05)
+
+T1_LGAvsAGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T1_LGA_AGA_adj_nulli_bmi.xlsx")
+T1_LGAvsAGA_sig <- T1_LGAvsAGA %>%
+  filter(adj.P.Val < 0.05) %>%
+  slice_head(n = 20)
+
+T2_LGAvsAGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T2_LGA_AGA_adj_nulli_bmi.xlsx")
+T2_LGAvsAGA_sig <- T2_LGAvsAGA %>%
+  filter(adj.P.Val < 0.05) %>%
+  slice_head(n = 20)
+
+T3_LGAvsAGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T3_LGA_AGA_adj_nulli_bmi.xlsx")
+T3_LGAvsAGA_sig <- T3_LGAvsAGA %>%
+  filter(adj.P.Val < 0.05) %>%
+  slice_head(n = 20)
+
+sig_DE_proteins <- c(T1_SGAvsAGA_sig$AptName, T2_SGAvsAGA_sig$AptName, T3_SGAvsAGA_sig$AptName, 
+                     T1_LGAvsAGA_sig$AptName, T2_LGAvsAGA_sig$AptName, T3_LGAvsAGA_sig$AptName, "EPO.5813.58")
+
+sig_DE_proteins <- unique(sig_DE_proteins)
+
+
+rm(T1_SGAvsAGA, T1_SGAvsAGA_sig, T2_SGAvsAGA, T2_SGAvsAGA_sig, T3_SGAvsAGA, T3_SGAvsAGA_sig,
+   T1_LGAvsAGA, T1_LGAvsAGA_sig, T2_LGAvsAGA, T2_LGAvsAGA_sig, T3_LGAvsAGA, T3_LGAvsAGA_sig)
+
+# Format dataset ----------------------------------------------------------
+load("../Data/MOM_exprset_STORK_SGA_LGA.RData")
+load("../Data/winslgRFU_exprset_STORK_SGA_LGA.RData")
+
+MOM_exprs <- exprs(MoM_exprset_STORK_LGA_SGA)
+lgRFU_exprs <- exprs(winslgRFU_exprset_STORK_LGA_SGA)
+prot <- fData(MoM_exprset_STORK_LGA_SGA)
+samp <- pData(MoM_exprset_STORK_LGA_SGA)
+
+#Format the expression matrix
+MOM_exprs <- melt(MOM_exprs)
+colnames(MOM_exprs) <- c("AptName", "SampleID", "MoM")
+lgRFU_exprs <- melt(lgRFU_exprs)
+colnames(lgRFU_exprs) <- c("AptName", "SampleID", "lgRFU")
+
+
+#Format the samp data
+samp <- samp %>%
+  select(TimePoint, GAWeeks, Bwkat, `Birthweight z-score`, BMI, Nulliparity, PE, ID) %>%
+  rownames_to_column(var = "SampleID")
+
+samp$TimePoint2 <- samp$TimePoint
+samp$TimePoint2 <- gsub("1", "Visit 1", samp$TimePoint2)
+samp$TimePoint2 <- gsub("2", "Visit 2", samp$TimePoint2)
+samp$TimePoint2 <- gsub("3", "Visit 3", samp$TimePoint2)
+
+#Merge expression data and samp
+MOM_exprs <- merge(samp, MOM_exprs, by = "SampleID")
+lgRFU_exprs <- merge(samp, lgRFU_exprs, by = "SampleID")
+
+#Select the relevant columns from prot
+prot <- prot %>%
+  select(SomaId, TargetFullName, AptName, EntrezGeneSymbol)
+
+prot <- prot %>%
+  mutate(EntrezGeneSymbol2 = paste0("(", EntrezGeneSymbol,  ")"))
+prot$TargetFullName_EntrezGeneSymbol <- paste(prot$TargetFullName, prot$EntrezGeneSymbol2)
+
+#Merge expression data and prot
+MOM_exprs <- merge(prot, MOM_exprs, by = "AptName")
+lgRFU_exprs <- merge(prot, lgRFU_exprs, by = "AptName")
+
+
+#Merge TargetFullName_EntrezGeneSymbol with TimePoint2
+MOM_exprs$TargetFullName_EntrezGeneSymbol_TimePoint <- paste(MOM_exprs$TargetFullName_EntrezGeneSymbol, MOM_exprs$TimePoint2)
+lgRFU_exprs$TargetFullName_EntrezGeneSymbol_TimePoint <- paste(lgRFU_exprs$TargetFullName_EntrezGeneSymbol, lgRFU_exprs$TimePoint2)
+
+save(MOM_exprs, lgRFU_exprs, file = "../Protein_plots/Formatted_datasets.R")
+load("../Protein_plots/Formatted_datasets.R")
+
+#What to compare in the box plots
+compare_list <- list(c("SGA", "AGA"), c("LGA", "AGA"), c("SGA", "LGA"))
+
+
+# Format dataset for fitting linear models --------------------------------
+load("../Data/winslgRFU_exprset_STORK_SGA_LGA.RData")
+
+lgRFU_exprs2 <- as.data.frame(exprs(winslgRFU_exprset_STORK_LGA_SGA))
+lgRFU_exprs2 <- filter(lgRFU_exprs2, grepl(paste(sig_DE_proteins, collapse = "|"), rownames(lgRFU_exprs2)))
+lgRFU_exprs2 <- lgRFU_exprs2 %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "SampleID")
+
+samp2 <- pData(MoM_exprset_STORK_LGA_SGA)
+samp2 <- samp2 %>%
+  select(GAWeeks, Bwkat, ID) %>%
+  rownames_to_column(var = "SampleID")
+
+lgRFU_exprs2 <- merge(samp2, lgRFU_exprs2, by = "SampleID")
+lgRFU_exprs2$ID <- as.factor(lgRFU_exprs2$ID)
+
+# Fit linear models -------------------------------------------------------
+
+#AGA
+AGA_df <- lgRFU_exprs2 %>%
+  filter(Bwkat == "AGA") %>%
+  arrange(GAWeeks)
+AptNames <- colnames(AGA_df[5:ncol(AGA_df)])
+
+Pred_df_AGA <- NULL
+
+for (Apt in AptNames) {
+  
+  AGA_df$Y=AGA_df[,Apt]
+  fit3_AGA <- gam(Y~s(GAWeeks,k=3)+s(ID,bs = 're'),
+                      data=AGA_df,
+                      method="ML")
+  
+  fit4_AGA <- gam(Y~s(GAWeeks,k=4)+s(ID,bs = 're'),
+                  data=AGA_df,
+                  method="ML")
+  
+  fit5_AGA <- gam(Y~s(GAWeeks,k=5)+s(ID,bs = 're'),
+                  data=AGA_df,
+                  method="ML")
+  
+  fit6_AGA <- gam(Y~s(GAWeeks,k=6)+s(ID,bs = 're'),
+                  data=AGA_df,
+                  method="ML")
+  
+  fit_AGA=list(fit3_AGA,fit4_AGA,
+                   fit5_AGA,fit6_AGA)[[which.max(c(summary(fit3_AGA)$r.sq,
+                                                           summary(fit4_AGA)$r.sq,
+                                                           summary(fit5_AGA)$r.sq, 
+                                                           summary(fit6_AGA)$r.sq))]]
+  
+  AGA_pred <- as.data.frame(AGA_df$GAWeeks)
+  colnames(AGA_pred) <- "GAWeeks"
+  AGA_pred$pred <- predict.gam(fit_AGA,AGA_pred,exclude="s(ID)",newdata.guaranteed=TRUE)
+  AGA_pred$AptName=Apt
+  Pred_df_AGA=rbind(Pred_df_AGA,AGA_pred)
+}
+
+#Pred_df_AGA <- merge(Pred_df_AGA, prot2, by = "AptName")
+Pred_df_AGA$Bwkat <- "AGA"
+
+
+#LGA
+LGA_df <- lgRFU_exprs2 %>%
+  filter(Bwkat == "LGA") %>%
+  arrange(GAWeeks)
+AptNames <- colnames(LGA_df[5:ncol(LGA_df)])
+
+Pred_df_LGA <- NULL
+
+for (Apt in AptNames) {
+  
+  LGA_df$Y=LGA_df[,Apt]
+  fit3_LGA <- gam(Y~s(GAWeeks,k=3)+s(ID,bs = 're'),
+                  data=LGA_df,
+                  method="ML")
+  
+  fit4_LGA <- gam(Y~s(GAWeeks,k=4)+s(ID,bs = 're'),
+                  data=LGA_df,
+                  method="ML")
+  
+  fit5_LGA <- gam(Y~s(GAWeeks,k=5)+s(ID,bs = 're'),
+                  data=LGA_df,
+                  method="ML")
+  
+  fit6_LGA <- gam(Y~s(GAWeeks,k=6)+s(ID,bs = 're'),
+                  data=LGA_df,
+                  method="ML")
+  
+  fit_LGA=list(fit3_LGA,fit4_LGA,
+               fit5_LGA,fit6_LGA)[[which.max(c(summary(fit3_LGA)$r.sq,
+                                               summary(fit4_LGA)$r.sq,
+                                               summary(fit5_LGA)$r.sq, 
+                                               summary(fit6_LGA)$r.sq))]]
+  
+  LGA_pred <- as.data.frame(LGA_df$GAWeeks)
+  colnames(LGA_pred) <- "GAWeeks"
+  LGA_pred$pred <- predict.gam(fit_LGA,LGA_pred,exclude="s(ID)",newdata.guaranteed=TRUE)
+  LGA_pred$AptName=Apt
+  Pred_df_LGA=rbind(Pred_df_LGA,LGA_pred)
+}
+
+#Pred_df_LGA <- merge(Pred_df_LGA, prot2, by = "AptName")
+Pred_df_LGA$Bwkat <- "LGA"
+
+#SGA
+SGA_df <- lgRFU_exprs2 %>%
+  filter(Bwkat == "SGA") %>%
+  arrange(GAWeeks)
+AptNames <- colnames(SGA_df[5:ncol(SGA_df)])
+
+Pred_df_SGA <- NULL
+
+for (Apt in AptNames) {
+  
+  SGA_df$Y=SGA_df[,Apt]
+  
+  fit3_SGA <- gam(Y~s(GAWeeks,k=3)+s(ID,bs = 're'),
+                  data=SGA_df,
+                  method="ML")
+  
+  fit4_SGA <- gam(Y~s(GAWeeks,k=4)+s(ID,bs = 're'),
+                  data=SGA_df,
+                  method="ML")
+  
+  fit5_SGA <- gam(Y~s(GAWeeks,k=5)+s(ID,bs = 're'),
+                  data=SGA_df,
+                  method="ML")
+  
+  fit6_SGA <- gam(Y~s(GAWeeks,k=6)+s(ID,bs = 're'),
+                  data=SGA_df,
+                  method="ML")
+  
+  fit_SGA=list(fit3_SGA,fit4_SGA,
+               fit5_SGA,fit6_SGA)[[which.max(c(summary(fit3_SGA)$r.sq,
+                                               summary(fit4_SGA)$r.sq,
+                                               summary(fit5_SGA)$r.sq, 
+                                               summary(fit6_SGA)$r.sq))]]
+  
+  
+  SGA_pred <- as.data.frame(SGA_df$GAWeeks)
+  colnames(SGA_pred) <- "GAWeeks"
+  SGA_pred$pred <- predict.gam(fit_SGA,SGA_pred,exclude="s(ID)",newdata.guaranteed=TRUE)
+  SGA_pred$AptName=Apt
+  Pred_df_SGA=rbind(Pred_df_SGA,SGA_pred)
+}
+
+#Pred_df_SGA <- merge(Pred_df_SGA, prot2, by = "AptName")
+Pred_df_SGA$Bwkat <- "SGA"
+
+
+save(Pred_df_AGA, Pred_df_LGA, Pred_df_SGA, file = "../Protein_plots/Fitted_models.RData")
+
+load("../Protein_plots/Fitted_models.RData")
+
+
+# MYL5.19286.30 --------------------------------------------------------------------
+
+MYL5.19286.30_MOM_exprs <- filter(MOM_exprs, grepl(paste("MYL5.19286.30", collapse = "|"), AptName)) 
+MYL5.19286.30_lgRFU_exprs <- filter(lgRFU_exprs, grepl(paste("MYL5.19286.30", collapse = "|"), AptName)) 
+MYL5.19286.30_Pred_df_AGA <- filter(Pred_df_AGA, grepl(paste("MYL5.19286.30", collapse = "|"), AptName)) 
+MYL5.19286.30_Pred_df_LGA <- filter(Pred_df_LGA, grepl(paste("MYL5.19286.30", collapse = "|"), AptName)) 
+MYL5.19286.30_Pred_df_SGA <- filter(Pred_df_SGA, grepl(paste("MYL5.19286.30", collapse = "|"), AptName)) 
+
+MYL5.19286.30_box <- ggplot(data = MYL5.19286.30_MOM_exprs, aes(factor(x = Bwkat, levels = c("SGA", "AGA", "LGA")), y = MoM, fill = Bwkat)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  theme_classic() +
+  xlab("") +
+  ylab("MoM") +
+  #labs(tag = "A)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) +
+  ylim(c(-1, 5)) +
+  #stat_compare_means(method = "t.test", comparisons = compare_list) +
+  stat_compare_means(method = "wilcox.test", comparisons = compare_list) +
+  facet_wrap(~TimePoint2) 
+
+MYL5.19286.30_corr <- ggplot(data = MYL5.19286.30_MOM_exprs, aes(x = `Birthweight z-score`, y = MoM, color = Bwkat)) +
+  geom_point(alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  #geom_smooth(method = "loess", se = TRUE, color = "black", group = 1) +
+  #geom_smooth(method = "lm", se = TRUE, color = "black", group = 1) +
+  geom_smooth(formula = y ~ x, method = "lm", se = TRUE, color = "black", group = 1) +
+  #stat_cor(method = "spearman", r.digits = 2, p.digits = 2, color = "black", group = 1) +
+  stat_cor(method = "pearson", r.digits = 2, p.digits = 2, color = "black", group = 1) +
+  #stat_cor(
+  #  aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~"), group = 1)) +
+  theme_classic() +
+  xlab("Birth weight (z- score)") +
+  ylab("MoM") +
+  #labs(tag = "B)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_text(size = 12),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) + 
+  facet_wrap(~TimePoint2)
+
+T1_MYL5.19286.30_MOM_exprs <- MYL5.19286.30_MOM_exprs %>%
+  filter(TimePoint == "1")
+T1_MYL5.19286.30_spearman <- corr.test(T1_MYL5.19286.30_MOM_exprs[,11], T1_MYL5.19286.30_MOM_exprs[,17], method = "pearson")
+T1_MYL5.19286.30_spearman$r
+#0.1878592
+
+
+
+T2_MYL5.19286.30_MOM_exprs <- MYL5.19286.30_MOM_exprs %>%
+  filter(TimePoint == "2")
+T2_MYL5.19286.30_spearman <- corr.test(T2_MYL5.19286.30_MOM_exprs[,11], T2_MYL5.19286.30_MOM_exprs[,17], method = "spearman")
+T2_MYL5.19286.30_spearman$r
+#0.1537237
+
+T3_MYL5.19286.30_MOM_exprs <- MYL5.19286.30_MOM_exprs %>%
+  filter(TimePoint == "3")
+T3_MYL5.19286.30_spearman <- corr.test(T3_MYL5.19286.30_MOM_exprs[,11], T3_MYL5.19286.30_MOM_exprs[,17], method = "spearman")
+T3_MYL5.19286.30_spearman$r
+#0.1656737
+
+MYL5.19286.30_fitted_line <- ggplot(data = MYL5.19286.30_lgRFU_exprs, aes(x = GAWeeks, y = lgRFU)) +
+  geom_point(aes(color = Bwkat), alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_line(data = filter(MYL5.19286.30_lgRFU_exprs, Bwkat == "AGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "Grey", linetype = "dashed", size=0.2) +
+  #stat_cor(data = filter(MYL5.19286.30_lgRFU_exprs, Bwkat == "AGA"), aes(x = GAWeeks, y = lgRFU), method = "spearman", r.digits = 2, p.digits = 2, color = "darkgrey", label.y = 13.0) +
+  geom_line(data = filter(MYL5.19286.30_lgRFU_exprs, Bwkat == "LGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "dodgerblue", linetype = "dashed", size=0.2) +
+  #stat_cor(data = filter(MYL5.19286.30_lgRFU_exprs, Bwkat == "LGA"), aes(x = GAWeeks, y = lgRFU), method = "pearson", r.digits = 2, p.digits = 2, color = "dodgerblue", label.y = 12.7) +
+  geom_line(data = filter(MYL5.19286.30_lgRFU_exprs, Bwkat == "SGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "orangered2", linetype = "dashed", size=0.2) +
+  #stat_cor(data = filter(MYL5.19286.30_lgRFU_exprs, Bwkat == "SGA"), aes(x = GAWeeks, y = lgRFU), method = "pearson", r.digits = 2, p.digits = 2, color = "orangered2", label.y = 12.4) +
+  geom_line(data = MYL5.19286.30_Pred_df_AGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "darkgrey", size=1.5) +
+  geom_line(data = MYL5.19286.30_Pred_df_LGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "dodgerblue", size=1.5) +
+  geom_line(data = MYL5.19286.30_Pred_df_SGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "orangered2", size=1.5) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  theme_classic() +
+  xlab("Gestational weeks") +
+  #labs(tag = "C)") +
+  theme(legend.title = element_blank(),
+        #legend.text = element_text(size=15),
+        #legend.key.size = unit(2, "cm"),
+        strip.text = element_text(size = 10),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13))
+
+MYL5.19286.30_title <- textGrob("Myosin light chain 5 (MYL5)", gp = gpar(fontsize = 20))
+
+MYL5.19286.30_plots <- ggarrange(MYL5.19286.30_title, MYL5.19286.30_box, MYL5.19286.30_corr, MYL5.19286.30_fitted_line,
+                       ncol = 1, heights = c(0.1, 1.2, 1, 1.2),
+                       labels = c(" ", "A)", "B)", "C)"),
+                       font.label = list(size = 20))
+
+ggsave(filename= "MYL5.19286.30_plot.png",
+       plot = MYL5.19286.30_plots,
+       device = "png",
+       path = "../Protein_plots/",
+       width = 25,
+       height = 32,
+       units = "cm",
+       bg = "white")
+
+# NFKBIA.19209.6 --------------------------------------------------------------------
+
+NFKBIA.19209.6_MOM_exprs <- filter(MOM_exprs, grepl(paste("NFKBIA.19209.6", collapse = "|"), AptName)) 
+NFKBIA.19209.6_lgRFU_exprs <- filter(lgRFU_exprs, grepl(paste("NFKBIA.19209.6", collapse = "|"), AptName)) 
+NFKBIA.19209.6_Pred_df_AGA <- filter(Pred_df_AGA, grepl(paste("NFKBIA.19209.6", collapse = "|"), AptName)) 
+NFKBIA.19209.6_Pred_df_LGA <- filter(Pred_df_LGA, grepl(paste("NFKBIA.19209.6", collapse = "|"), AptName)) 
+NFKBIA.19209.6_Pred_df_SGA <- filter(Pred_df_SGA, grepl(paste("NFKBIA.19209.6", collapse = "|"), AptName)) 
+
+NFKBIA.19209.6_box <- ggplot(data = NFKBIA.19209.6_MOM_exprs, aes(factor(x = Bwkat, levels = c("SGA", "AGA", "LGA")), y = MoM, fill = Bwkat)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  theme_classic() +
+  xlab("") +
+  ylab("MoM") +
+  #labs(tag = "A)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) +
+  stat_compare_means(method = "t.test", comparisons = compare_list) +
+  facet_wrap(~TimePoint2) 
+
+
+NFKBIA.19209.6_corr <- ggplot(data = NFKBIA.19209.6_MOM_exprs, aes(x = `Birthweight z-score`, y = MoM, color = Bwkat)) +
+  geom_point(alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", group = 1) +
+  stat_cor(method = "pearson", r.digits = 2, p.digits = 2, color = "black", group = 1, size = 5) +
+  theme_classic() +
+  xlab("Birth weight (z- score)") +
+  ylab("MoM") +
+  #labs(tag = "B)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_text(size = 12),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) + 
+  facet_wrap(~TimePoint2)
+
+T1_NFKBIA.19209.6_MOM_exprs <- NFKBIA.19209.6_MOM_exprs %>%
+  filter(TimePoint == "1")
+T1_NFKBIA.19209.6_spearman <- corr.test(T1_NFKBIA.19209.6_MOM_exprs[,11], T1_NFKBIA.19209.6_MOM_exprs[,17], method = "spearman")
+T1_NFKBIA.19209.6_spearman$r
+#-0.004304123
+
+T2_NFKBIA.19209.6_MOM_exprs <- NFKBIA.19209.6_MOM_exprs %>%
+  filter(TimePoint == "2")
+T2_NFKBIA.19209.6_spearman <- corr.test(T2_NFKBIA.19209.6_MOM_exprs[,11], T2_NFKBIA.19209.6_MOM_exprs[,17], method = "spearman")
+T2_NFKBIA.19209.6_spearman$r
+#-0.05031975
+
+T3_NFKBIA.19209.6_MOM_exprs <- NFKBIA.19209.6_MOM_exprs %>%
+  filter(TimePoint == "3")
+T3_NFKBIA.19209.6_spearman <- corr.test(T3_NFKBIA.19209.6_MOM_exprs[,11], T3_NFKBIA.19209.6_MOM_exprs[,17], method = "spearman")
+T3_NFKBIA.19209.6_spearman$r
+#-0.007453481
+
+
+NFKBIA.19209.6_fitted_line <- ggplot(data = NFKBIA.19209.6_lgRFU_exprs, aes(x = GAWeeks, y = lgRFU)) +
+  geom_point(aes(color = Bwkat), alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_line(data = filter(NFKBIA.19209.6_lgRFU_exprs, Bwkat == "AGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "Grey", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(NFKBIA.19209.6_lgRFU_exprs, Bwkat == "LGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "dodgerblue", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(NFKBIA.19209.6_lgRFU_exprs, Bwkat == "SGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "orangered2", linetype = "dashed", size=0.2) +
+  geom_line(data = NFKBIA.19209.6_Pred_df_AGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "darkgrey", size=1.5) +
+  geom_line(data = NFKBIA.19209.6_Pred_df_LGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "dodgerblue", size=1.5) +
+  geom_line(data = NFKBIA.19209.6_Pred_df_SGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "orangered2", size=1.5) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  theme_classic() +
+  xlab("Gestational weeks") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 10),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) 
+
+NFKBIA.19209.6_title <- textGrob("NF-kappa-B inhibitor alpha (NFKBIA)", gp = gpar(fontsize = 20))
+
+NFKBIA.19209.6_plots <- ggarrange(NFKBIA.19209.6_title, NFKBIA.19209.6_box, NFKBIA.19209.6_corr, NFKBIA.19209.6_fitted_line,
+                                 ncol = 1, heights = c(0.1, 1.2, 1, 1.2),
+                                 labels = c(" ", "A)", "B)", "C)"))
+
+ggsave(filename= "NFKBIA.19209.6_plot.png",
+       plot = NFKBIA.19209.6_plots,
+       device = "png",
+       path = "../Protein_plots/",
+       width = 25,
+       height = 32,
+       units = "cm",
+       bg = "white")
+
+# TIGIT.9638.2 --------------------------------------------------------------------
+
+TIGIT.9638.2_MOM_exprs <- filter(MOM_exprs, grepl(paste("TIGIT.9638.2", collapse = "|"), AptName)) 
+TIGIT.9638.2_lgRFU_exprs <- filter(lgRFU_exprs, grepl(paste("TIGIT.9638.2", collapse = "|"), AptName)) 
+TIGIT.9638.2_Pred_df_AGA <- filter(Pred_df_AGA, grepl(paste("TIGIT.9638.2", collapse = "|"), AptName)) 
+TIGIT.9638.2_Pred_df_LGA <- filter(Pred_df_LGA, grepl(paste("TIGIT.9638.2", collapse = "|"), AptName)) 
+TIGIT.9638.2_Pred_df_SGA <- filter(Pred_df_SGA, grepl(paste("TIGIT.9638.2", collapse = "|"), AptName)) 
+
+TIGIT.9638.2_box <- ggplot(data = TIGIT.9638.2_MOM_exprs, aes(factor(x = Bwkat, levels = c("SGA", "AGA", "LGA")), y = MoM, fill = Bwkat)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  theme_classic() +
+  xlab("") +
+  ylab("MoM") +
+  #labs(tag = "A)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) +
+  stat_compare_means(method = "t.test", comparisons = compare_list) +
+  facet_wrap(~TimePoint2) 
+
+
+TIGIT.9638.2_corr <- ggplot(data = TIGIT.9638.2_MOM_exprs, aes(x = `Birthweight z-score`, y = MoM, color = Bwkat)) +
+  geom_point(alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  #geom_smooth(method = "loess", se = TRUE, color = "black", group = 1) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", group = 1) +
+  stat_cor(method = "pearson", r.digits = 2, p.digits = 2, color = "black", group = 1) +
+  theme_classic() +
+  xlab("Birth weight (z- score)") +
+  ylab("MoM") +
+  #labs(tag = "B)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_text(size = 12),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) + 
+  facet_wrap(~TimePoint2)
+
+T1_TIGIT.9638.2_MOM_exprs <- TIGIT.9638.2_MOM_exprs %>%
+  filter(TimePoint == "1")
+T1_TIGIT.9638.2_spearman <- corr.test(T1_TIGIT.9638.2_MOM_exprs[,11], T1_TIGIT.9638.2_MOM_exprs[,17], method = "spearman")
+T1_TIGIT.9638.2_spearman$r
+#0.04262132
+
+T2_TIGIT.9638.2_MOM_exprs <- TIGIT.9638.2_MOM_exprs %>%
+  filter(TimePoint == "2")
+T2_TIGIT.9638.2_spearman <- corr.test(T2_TIGIT.9638.2_MOM_exprs[,11], T2_TIGIT.9638.2_MOM_exprs[,17], method = "spearman")
+T2_TIGIT.9638.2_spearman$r
+#0.08904014
+
+T3_TIGIT.9638.2_MOM_exprs <- TIGIT.9638.2_MOM_exprs %>%
+  filter(TimePoint == "3")
+T3_TIGIT.9638.2_spearman <- corr.test(T3_TIGIT.9638.2_MOM_exprs[,11], T3_TIGIT.9638.2_MOM_exprs[,17], method = "spearman")
+T3_TIGIT.9638.2_spearman$r
+#0.09358925
+
+
+TIGIT.9638.2_fitted_line <- ggplot(data = TIGIT.9638.2_lgRFU_exprs, aes(x = GAWeeks, y = lgRFU)) +
+  geom_point(aes(color = Bwkat), alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_line(data = filter(TIGIT.9638.2_lgRFU_exprs, Bwkat == "AGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "Grey", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(TIGIT.9638.2_lgRFU_exprs, Bwkat == "LGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "dodgerblue", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(TIGIT.9638.2_lgRFU_exprs, Bwkat == "SGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "orangered2", linetype = "dashed", size=0.2) +
+  geom_line(data = TIGIT.9638.2_Pred_df_AGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "darkgrey", size=1.5) +
+  geom_line(data = TIGIT.9638.2_Pred_df_LGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "dodgerblue", size=1.5) +
+  geom_line(data = TIGIT.9638.2_Pred_df_SGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "orangered2", size=1.5) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  theme_classic() +
+  xlab("Gestational weeks") +
+  theme(legend.title = element_blank(),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) 
+
+TIGIT.9638.2_title <- textGrob("T-cell immunoreceptor with Ig and ITIM domains (TIGIT)", gp = gpar(fontsize = 20))
+
+TIGIT.9638.2_plots <- ggarrange(TIGIT.9638.2_title, TIGIT.9638.2_box, TIGIT.9638.2_corr, TIGIT.9638.2_fitted_line,
+                                  ncol = 1, heights = c(0.1, 1.2, 1, 1.2),
+                                  labels = c(" ", "A)", "B)", "C)"))
+
+ggsave(filename= "TIGIT.9638.2_plot.png",
+       plot = TIGIT.9638.2_plots,
+       device = "png",
+       path = "../Protein_plots/",
+       width = 25,
+       height = 32,
+       units = "cm",
+       bg = "white")
+
+
+
+# CRLF1.CLCF1.2607.54--------------------------------------------------------------------
+
+CRLF1.CLCF1.2607.54_MOM_exprs <- filter(MOM_exprs, grepl(paste("CRLF1.CLCF1.2607.54", collapse = "|"), AptName)) 
+CRLF1.CLCF1.2607.54_lgRFU_exprs <- filter(lgRFU_exprs, grepl(paste("CRLF1.CLCF1.2607.54", collapse = "|"), AptName)) 
+CRLF1.CLCF1.2607.54_Pred_df_AGA <- filter(Pred_df_AGA, grepl(paste("CRLF1.CLCF1.2607.54", collapse = "|"), AptName)) 
+CRLF1.CLCF1.2607.54_Pred_df_LGA <- filter(Pred_df_LGA, grepl(paste("CRLF1.CLCF1.2607.54", collapse = "|"), AptName)) 
+CRLF1.CLCF1.2607.54_Pred_df_SGA <- filter(Pred_df_SGA, grepl(paste("CRLF1.CLCF1.2607.54", collapse = "|"), AptName)) 
+
+CRLF1.CLCF1.2607.54_box <- ggplot(data = CRLF1.CLCF1.2607.54_MOM_exprs, aes(factor(x = Bwkat, levels = c("SGA", "AGA", "LGA")), y = MoM, fill = Bwkat)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  theme_classic() +
+  xlab("") +
+  ylab("MoM") +
+  #labs(tag = "A)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) +
+  stat_compare_means(method = "t.test", comparisons = compare_list) +
+  facet_wrap(~TimePoint2) 
+
+
+CRLF1.CLCF1.2607.54_corr <- ggplot(data = CRLF1.CLCF1.2607.54_MOM_exprs, aes(x = `Birthweight z-score`, y = MoM, color = Bwkat)) +
+  geom_point(alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", group = 1) +
+  stat_cor(method = "pearson", r.digits = 2, p.digits = 2, color = "black", group = 1) +
+  theme_classic() +
+  xlab("Birth weight (z- score)") +
+  ylab("MoM") +
+  #labs(tag = "B)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_text(size = 12),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) + 
+  facet_wrap(~TimePoint2)
+
+CRLF1.CLCF1.2607.54_fitted_line <- ggplot(data = CRLF1.CLCF1.2607.54_lgRFU_exprs, aes(x = GAWeeks, y = lgRFU)) +
+  geom_point(aes(color = Bwkat), alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_line(data = filter(CRLF1.CLCF1.2607.54_lgRFU_exprs, Bwkat == "AGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "Grey", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(CRLF1.CLCF1.2607.54_lgRFU_exprs, Bwkat == "LGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "dodgerblue", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(CRLF1.CLCF1.2607.54_lgRFU_exprs, Bwkat == "SGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "orangered2", linetype = "dashed", size=0.2) +
+  geom_line(data = CRLF1.CLCF1.2607.54_Pred_df_AGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "darkgrey", size=1.5) +
+  geom_line(data = CRLF1.CLCF1.2607.54_Pred_df_LGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "dodgerblue", size=1.5) +
+  geom_line(data = CRLF1.CLCF1.2607.54_Pred_df_SGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "orangered2", size=1.5) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  theme_classic() +
+  xlab("Gestational weeks") +
+  theme(legend.title = element_blank(),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) 
+
+CRLF1.CLCF1.2607.54_title <- textGrob("Cytokine receptor-like factor 1:Cardiotrophin-like cytokine factor 1 Complex (CRLF1 CLCF1)", gp = gpar(fontsize = 15))
+
+CRLF1.CLCF1.2607.54_plots <- ggarrange(CRLF1.CLCF1.2607.54_title, CRLF1.CLCF1.2607.54_box, CRLF1.CLCF1.2607.54_corr, CRLF1.CLCF1.2607.54_fitted_line,
+                                  ncol = 1, heights = c(0.1, 1.2, 1, 1.2),
+                                  labels = c(" ", "A)", "B)", "C)"))
+
+ggsave(filename= "CRLF1.CLCF1.2607.54_plot.png",
+       plot = CRLF1.CLCF1.2607.54_plots,
+       device = "png",
+       path = "../Protein_plots/",
+       width = 25,
+       height = 32,
+       units = "cm",
+       bg = "white")
+
+
+
+
+# ARMC10.9107.59--------------------------------------------------------------------
+
+ARMC10.9107.59_MOM_exprs <- filter(MOM_exprs, grepl(paste("ARMC10.9107.59", collapse = "|"), AptName)) 
+ARMC10.9107.59_lgRFU_exprs <- filter(lgRFU_exprs, grepl(paste("ARMC10.9107.59", collapse = "|"), AptName)) 
+ARMC10.9107.59_Pred_df_AGA <- filter(Pred_df_AGA, grepl(paste("ARMC10.9107.59", collapse = "|"), AptName)) 
+ARMC10.9107.59_Pred_df_LGA <- filter(Pred_df_LGA, grepl(paste("ARMC10.9107.59", collapse = "|"), AptName)) 
+ARMC10.9107.59_Pred_df_SGA <- filter(Pred_df_SGA, grepl(paste("ARMC10.9107.59", collapse = "|"), AptName)) 
+
+ARMC10.9107.59_box <- ggplot(data = ARMC10.9107.59_MOM_exprs, aes(factor(x = Bwkat, levels = c("SGA", "AGA", "LGA")), y = MoM, fill = Bwkat)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  theme_classic() +
+  xlab("") +
+  ylab("MoM") +
+  #labs(tag = "A)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) +
+  stat_compare_means(method = "t.test", comparisons = compare_list) +
+  facet_wrap(~TimePoint2) 
+
+
+ARMC10.9107.59_corr <- ggplot(data = ARMC10.9107.59_MOM_exprs, aes(x = `Birthweight z-score`, y = MoM, color = Bwkat)) +
+  geom_point(alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", group = 1) +
+  stat_cor(method = "pearson", r.digits = 2, p.digits = 2, color = "black", group = 1) +
+  theme_classic() +
+  xlab("Birth weight (z- score)") +
+  ylab("MoM") +
+  #labs(tag = "B)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_text(size = 12),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) + 
+  facet_wrap(~TimePoint2)
+
+ARMC10.9107.59_fitted_line <- ggplot(data = ARMC10.9107.59_lgRFU_exprs, aes(x = GAWeeks, y = lgRFU)) +
+  geom_point(aes(color = Bwkat), alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_line(data = filter(ARMC10.9107.59_lgRFU_exprs, Bwkat == "AGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "Grey", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(ARMC10.9107.59_lgRFU_exprs, Bwkat == "LGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "dodgerblue", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(ARMC10.9107.59_lgRFU_exprs, Bwkat == "SGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "orangered2", linetype = "dashed", size=0.2) +
+  geom_line(data = ARMC10.9107.59_Pred_df_AGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "darkgrey", size=1.5) +
+  geom_line(data = ARMC10.9107.59_Pred_df_LGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "dodgerblue", size=1.5) +
+  geom_line(data = ARMC10.9107.59_Pred_df_SGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "orangered2", size=1.5) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  theme_classic() +
+  xlab("Gestational weeks") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 10),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) 
+
+ARMC10.9107.59_title <- textGrob("Armadillo repeat-containing protein 10 (ARMC10)", gp = gpar(fontsize = 20))
+
+ARMC10.9107.59_plots <- ggarrange(ARMC10.9107.59_title, ARMC10.9107.59_box, ARMC10.9107.59_corr, ARMC10.9107.59_fitted_line,
+                                  ncol = 1, heights = c(0.1, 1.2, 1, 1.2),
+                                  labels = c(" ", "A)", "B)", "C)"))
+
+ggsave(filename= "ARMC10.9107.59_plot.png",
+       plot = ARMC10.9107.59_plots,
+       device = "png",
+       path = "../Protein_plots/",
+       width = 25,
+       height = 32,
+       units = "cm",
+       bg = "white")
+
+
+
+# MTMR6.12536.46 --------------------------------------------------------------------
+
+MTMR6.12536.46_MOM_exprs <- filter(MOM_exprs, grepl(paste("MTMR6.12536.46", collapse = "|"), AptName)) 
+MTMR6.12536.46_lgRFU_exprs <- filter(lgRFU_exprs, grepl(paste("MTMR6.12536.46", collapse = "|"), AptName)) 
+MTMR6.12536.46_Pred_df_AGA <- filter(Pred_df_AGA, grepl(paste("MTMR6.12536.46", collapse = "|"), AptName)) 
+MTMR6.12536.46_Pred_df_LGA <- filter(Pred_df_LGA, grepl(paste("MTMR6.12536.46", collapse = "|"), AptName)) 
+MTMR6.12536.46_Pred_df_SGA <- filter(Pred_df_SGA, grepl(paste("MTMR6.12536.46", collapse = "|"), AptName)) 
+
+MTMR6.12536.46_box <- ggplot(data = MTMR6.12536.46_MOM_exprs, aes(factor(x = Bwkat, levels = c("SGA", "AGA", "LGA")), y = MoM, fill = Bwkat)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  theme_classic() +
+  xlab("") +
+  ylab("MoM") +
+  #labs(tag = "A)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) +
+  stat_compare_means(method = "t.test", comparisons = compare_list) +
+  facet_wrap(~TimePoint2) 
+
+
+MTMR6.12536.46_corr <- ggplot(data = MTMR6.12536.46_MOM_exprs, aes(x = `Birthweight z-score`, y = MoM, color = Bwkat)) +
+  geom_point(alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", group = 1) +
+  stat_cor(method = "pearson", r.digits = 2, p.digits = 2, color = "black", group = 1) +
+  theme_classic() +
+  xlab("Birth weight (z- score)") +
+  ylab("MoM") +
+  #labs(tag = "B)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_text(size = 12),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) + 
+  facet_wrap(~TimePoint2)
+
+MTMR6.12536.46_fitted_line <- ggplot(data = MTMR6.12536.46_lgRFU_exprs, aes(x = GAWeeks, y = lgRFU)) +
+  geom_point(aes(color = Bwkat), alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_line(data = filter(MTMR6.12536.46_lgRFU_exprs, Bwkat == "AGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "Grey", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(MTMR6.12536.46_lgRFU_exprs, Bwkat == "LGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "dodgerblue", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(MTMR6.12536.46_lgRFU_exprs, Bwkat == "SGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "orangered2", linetype = "dashed", size=0.2) +
+  geom_line(data = MTMR6.12536.46_Pred_df_AGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "darkgrey", size=1.5) +
+  geom_line(data = MTMR6.12536.46_Pred_df_LGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "dodgerblue", size=1.5) +
+  geom_line(data = MTMR6.12536.46_Pred_df_SGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "orangered2", size=1.5) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  theme_classic() +
+  xlab("Gestational weeks") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 10),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) 
+
+MTMR6.12536.46_title <- textGrob("Myotubularin-related protein 6 (MTMR6)", gp = gpar(fontsize = 20))
+
+MTMR6.12536.46_plots <- ggarrange(MTMR6.12536.46_title, MTMR6.12536.46_box, MTMR6.12536.46_corr, MTMR6.12536.46_fitted_line,
+                                  ncol = 1, heights = c(0.1, 1.2, 1, 1.2),
+                                  labels = c(" ", "A)", "B)", "C)"))
+
+ggsave(filename= "MTMR6.12536.46_plot.png",
+       plot = MTMR6.12536.46_plots,
+       device = "png",
+       path = "../Protein_plots/",
+       width = 25,
+       height = 32,
+       units = "cm",
+       bg = "white")
+
+
+
+# UNC5A.7975.97 --------------------------------------------------------------------
+
+UNC5A.7975.97_MOM_exprs <- filter(MOM_exprs, grepl(paste("UNC5A.7975.97", collapse = "|"), AptName)) 
+UNC5A.7975.97_lgRFU_exprs <- filter(lgRFU_exprs, grepl(paste("UNC5A.7975.97", collapse = "|"), AptName)) 
+UNC5A.7975.97_Pred_df_AGA <- filter(Pred_df_AGA, grepl(paste("UNC5A.7975.97", collapse = "|"), AptName)) 
+UNC5A.7975.97_Pred_df_LGA <- filter(Pred_df_LGA, grepl(paste("UNC5A.7975.97", collapse = "|"), AptName)) 
+UNC5A.7975.97_Pred_df_SGA <- filter(Pred_df_SGA, grepl(paste("UNC5A.7975.97", collapse = "|"), AptName)) 
+
+UNC5A.7975.97_box <- ggplot(data = UNC5A.7975.97_MOM_exprs, aes(factor(x = Bwkat, levels = c("SGA", "AGA", "LGA")), y = MoM, fill = Bwkat)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  theme_classic() +
+  xlab("") +
+  ylab("MoM") +
+  #labs(tag = "A)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12)) +
+  stat_compare_means(method = "t.test", comparisons = compare_list) +
+  facet_wrap(~TimePoint2) 
+
+
+UNC5A.7975.97_corr <- ggplot(data = UNC5A.7975.97_MOM_exprs, aes(x = `Birthweight z-score`, y = MoM, color = Bwkat)) +
+  geom_point(alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", group = 1) +
+  stat_cor(method = "pearson", r.digits = 2, p.digits = 2, color = "black", group = 1) +
+  theme_classic() +
+  xlab("Birth weight (z- score)") +
+  ylab("MoM") +
+  #labs(tag = "B)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_text(size = 12),
+        axis.text = element_text(size = 12)) + 
+  facet_wrap(~TimePoint2)
+
+UNC5A.7975.97_fitted_line <- ggplot(data = UNC5A.7975.97_lgRFU_exprs, aes(x = GAWeeks, y = lgRFU)) +
+  geom_point(aes(color = Bwkat), alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_line(data = filter(UNC5A.7975.97_lgRFU_exprs, Bwkat == "AGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "Grey", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(UNC5A.7975.97_lgRFU_exprs, Bwkat == "LGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "dodgerblue", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(UNC5A.7975.97_lgRFU_exprs, Bwkat == "SGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "orangered2", linetype = "dashed", size=0.2) +
+  geom_line(data = UNC5A.7975.97_Pred_df_AGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "darkgrey", size=1.5) +
+  geom_line(data = UNC5A.7975.97_Pred_df_LGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "dodgerblue", size=1.5) +
+  geom_line(data = UNC5A.7975.97_Pred_df_SGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "orangered2", size=1.5) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  theme_classic() +
+  xlab("Gestational weeks") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 10),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12)) 
+
+UNC5A.7975.97_title <- textGrob("Netrin receptor UNC5A (UNC5A)", gp = gpar(fontsize = 20))
+
+UNC5A.7975.97_plots <- ggarrange(UNC5A.7975.97_title, UNC5A.7975.97_box, UNC5A.7975.97_corr, UNC5A.7975.97_fitted_line,
+                                  ncol = 1, heights = c(0.1, 1.2, 1, 1.2),
+                                  labels = c(" ", "A)", "B)", "C)"))
+
+ggsave(filename= "UNC5A.7975.97_plot.png",
+       plot = UNC5A.7975.97_plots,
+       device = "png",
+       path = "../Protein_plots/",
+       width = 25,
+       height = 32,
+       units = "cm",
+       bg = "white")
+
+
+# EPO.5813.58 --------------------------------------------------------------------
+
+EPO.5813.58_MOM_exprs <- filter(MOM_exprs, grepl(paste("EPO.5813.58", collapse = "|"), AptName)) 
+EPO.5813.58_lgRFU_exprs <- filter(lgRFU_exprs, grepl(paste("EPO.5813.58", collapse = "|"), AptName)) 
+EPO.5813.58_Pred_df_AGA <- filter(Pred_df_AGA, grepl(paste("EPO.5813.58", collapse = "|"), AptName)) 
+EPO.5813.58_Pred_df_LGA <- filter(Pred_df_LGA, grepl(paste("EPO.5813.58", collapse = "|"), AptName)) 
+EPO.5813.58_Pred_df_SGA <- filter(Pred_df_SGA, grepl(paste("EPO.5813.58", collapse = "|"), AptName)) 
+
+EPO.5813.58_box <- ggplot(data = EPO.5813.58_MOM_exprs, aes(factor(x = Bwkat, levels = c("SGA", "AGA", "LGA")), y = MoM, fill = Bwkat)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  theme_classic() +
+  xlab("") +
+  ylab("MoM") +
+  #labs(tag = "A)") +
+  ylim(c(-1.1, 2.1)) +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) +
+  stat_compare_means(method = "t.test", comparisons = compare_list) +
+  facet_wrap(~TimePoint2) 
+
+
+EPO.5813.58_corr <- ggplot(data = EPO.5813.58_MOM_exprs, aes(x = `Birthweight z-score`, y = MoM, color = Bwkat)) +
+  geom_point(alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", group = 1) +
+  stat_cor(method = "pearson", r.digits = 2, p.digits = 2, color = "black", group = 1) +
+  theme_classic() +
+  xlab("Birth weight (z- score)") +
+  ylab("MoM") +
+  #labs(tag = "B)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_text(size = 12),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) + 
+  facet_wrap(~TimePoint2)
+
+T1_EPO.5813.58_MOM_exprs <- EPO.5813.58_MOM_exprs %>%
+  filter(TimePoint == "1")
+T1_EPO.5813.58_spearman <- corr.test(T1_EPO.5813.58_MOM_exprs[,11], T1_EPO.5813.58_MOM_exprs[,17], method = "spearman")
+T1_EPO.5813.58_spearman$r
+#0.292103
+
+T2_EPO.5813.58_MOM_exprs <- EPO.5813.58_MOM_exprs %>%
+  filter(TimePoint == "2")
+T2_EPO.5813.58_spearman <- corr.test(T2_EPO.5813.58_MOM_exprs[,11], T2_EPO.5813.58_MOM_exprs[,17], method = "spearman")
+T2_EPO.5813.58_spearman$r
+#0.2484844
+
+T3_EPO.5813.58_MOM_exprs <- EPO.5813.58_MOM_exprs %>%
+  filter(TimePoint == "3")
+T3_EPO.5813.58_spearman <- corr.test(T3_EPO.5813.58_MOM_exprs[,11], T3_EPO.5813.58_MOM_exprs[,17], method = "spearman")
+T3_EPO.5813.58_spearman$r
+#0.23284260.19
+
+
+EPO.5813.58_fitted_line <- ggplot(data = EPO.5813.58_lgRFU_exprs, aes(x = GAWeeks, y = lgRFU)) +
+  geom_point(aes(color = Bwkat), alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_line(data = filter(EPO.5813.58_lgRFU_exprs, Bwkat == "AGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "Grey", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(EPO.5813.58_lgRFU_exprs, Bwkat == "LGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "dodgerblue", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(EPO.5813.58_lgRFU_exprs, Bwkat == "SGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "orangered2", linetype = "dashed", size=0.2) +
+  geom_line(data = EPO.5813.58_Pred_df_AGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "darkgrey", size=1.5) +
+  geom_line(data = EPO.5813.58_Pred_df_LGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "dodgerblue", size=1.5) +
+  geom_line(data = EPO.5813.58_Pred_df_SGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "orangered2", size=1.5) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  theme_classic() +
+  xlab("Gestational weeks") +
+  theme(legend.title = element_blank(),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) 
+
+EPO.5813.58_title <- textGrob("Erythropoietin (EPO)", gp = gpar(fontsize = 20))
+
+EPO.5813.58_plots <- ggarrange(EPO.5813.58_title, EPO.5813.58_box, EPO.5813.58_corr, EPO.5813.58_fitted_line,
+                                  ncol = 1, heights = c(0.1, 1.2, 1, 1.2),
+                                  labels = c(" ", "A)", "B)", "C)"),
+                               font.label = list(size = 20))
+
+ggsave(filename= "EPO.5813.58_plot.png",
+       plot = EPO.5813.58_plots,
+       device = "png",
+       path = "../Protein_plots/",
+       width = 25,
+       height = 32,
+       units = "cm",
+       bg = "white")
+
+
+
+# C1orf210.8088.56 --------------------------------------------------------------------
+
+C1orf210.8088.56_MOM_exprs <- filter(MOM_exprs, grepl(paste("C1orf210.8088.56", collapse = "|"), AptName)) 
+C1orf210.8088.56_lgRFU_exprs <- filter(lgRFU_exprs, grepl(paste("C1orf210.8088.56", collapse = "|"), AptName)) 
+C1orf210.8088.56_Pred_df_AGA <- filter(Pred_df_AGA, grepl(paste("C1orf210.8088.56", collapse = "|"), AptName)) 
+C1orf210.8088.56_Pred_df_LGA <- filter(Pred_df_LGA, grepl(paste("C1orf210.8088.56", collapse = "|"), AptName)) 
+C1orf210.8088.56_Pred_df_SGA <- filter(Pred_df_SGA, grepl(paste("C1orf210.8088.56", collapse = "|"), AptName)) 
+
+C1orf210.8088.56_box <- ggplot(data = C1orf210.8088.56_MOM_exprs, aes(factor(x = Bwkat, levels = c("SGA", "AGA", "LGA")), y = MoM, fill = Bwkat)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  theme_classic() +
+  xlab("") +
+  ylab("MoM") +
+  #labs(tag = "A)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12)) +
+  stat_compare_means(method = "t.test", comparisons = compare_list) +
+  facet_wrap(~TimePoint2) 
+
+
+C1orf210.8088.56_corr <- ggplot(data = C1orf210.8088.56_MOM_exprs, aes(x = `Birthweight z-score`, y = MoM, color = Bwkat)) +
+  geom_point(alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", group = 1) +
+  stat_cor(method = "pearson", r.digits = 2, p.digits = 2, color = "black", group = 1) +
+  theme_classic() +
+  xlab("Birth weight (z- score)") +
+  ylab("MoM") +
+  #labs(tag = "B)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_text(size = 12),
+        axis.text = element_text(size = 12)) + 
+  facet_wrap(~TimePoint2)
+
+C1orf210.8088.56_fitted_line <- ggplot(data = C1orf210.8088.56_lgRFU_exprs, aes(x = GAWeeks, y = lgRFU)) +
+  geom_point(aes(color = Bwkat), alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_line(data = filter(C1orf210.8088.56_lgRFU_exprs, Bwkat == "AGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "Grey", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(C1orf210.8088.56_lgRFU_exprs, Bwkat == "LGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "dodgerblue", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(C1orf210.8088.56_lgRFU_exprs, Bwkat == "SGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "orangered2", linetype = "dashed", size=0.2) +
+  geom_line(data = C1orf210.8088.56_Pred_df_AGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "darkgrey", size=1.5) +
+  geom_line(data = C1orf210.8088.56_Pred_df_LGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "dodgerblue", size=1.5) +
+  geom_line(data = C1orf210.8088.56_Pred_df_SGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "orangered2", size=1.5) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  theme_classic() +
+  xlab("Gestational weeks") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12)) 
+
+C1orf210.8088.56_title <- textGrob("Type III endosome membrane protein TEMP (C1orf210)", gp = gpar(fontsize = 20))
+
+C1orf210.8088.56_plots <- ggarrange(C1orf210.8088.56_title, C1orf210.8088.56_box, C1orf210.8088.56_corr, C1orf210.8088.56_fitted_line,
+                                  ncol = 1, heights = c(0.1, 1.2, 1, 1.2),
+                                  labels = c(" ", "A)", "B)", "C)"))
+
+ggsave(filename= "C1orf210.8088.56_plot.png",
+       plot = C1orf210.8088.56_plots,
+       device = "png",
+       path = "../Protein_plots/",
+       width = 25,
+       height = 32,
+       units = "cm",
+       bg = "white")
+
+
+# ITGA2.15603.20 --------------------------------------------------------------------
+
+ITGA2.15603.20_MOM_exprs <- filter(MOM_exprs, grepl(paste("ITGA2.15603.20", collapse = "|"), AptName)) 
+ITGA2.15603.20_lgRFU_exprs <- filter(lgRFU_exprs, grepl(paste("ITGA2.15603.20", collapse = "|"), AptName)) 
+ITGA2.15603.20_Pred_df_AGA <- filter(Pred_df_AGA, grepl(paste("ITGA2.15603.20", collapse = "|"), AptName)) 
+ITGA2.15603.20_Pred_df_LGA <- filter(Pred_df_LGA, grepl(paste("ITGA2.15603.20", collapse = "|"), AptName)) 
+ITGA2.15603.20_Pred_df_SGA <- filter(Pred_df_SGA, grepl(paste("ITGA2.15603.20", collapse = "|"), AptName)) 
+
+ITGA2.15603.20_box <- ggplot(data = ITGA2.15603.20_MOM_exprs, aes(factor(x = Bwkat, levels = c("SGA", "AGA", "LGA")), y = MoM, fill = Bwkat)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  theme_classic() +
+  xlab("") +
+  ylab("MoM") +
+  #labs(tag = "A)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12)) +
+  stat_compare_means(method = "t.test", comparisons = compare_list) +
+  facet_wrap(~TimePoint2) 
+
+
+ITGA2.15603.20_corr <- ggplot(data = ITGA2.15603.20_MOM_exprs, aes(x = `Birthweight z-score`, y = MoM, color = Bwkat)) +
+  geom_point(alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", group = 1) +
+  stat_cor(method = "pearson", r.digits = 2, p.digits = 2, color = "black", group = 1) +
+  theme_classic() +
+  xlab("Birth weight (z- score)") +
+  ylab("MoM") +
+  #labs(tag = "B)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_text(size = 12),
+        axis.text = element_text(size = 12)) + 
+  facet_wrap(~TimePoint2)
+
+ITGA2.15603.20_fitted_line <- ggplot(data = ITGA2.15603.20_lgRFU_exprs, aes(x = GAWeeks, y = lgRFU)) +
+  geom_point(aes(color = Bwkat), alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_line(data = filter(ITGA2.15603.20_lgRFU_exprs, Bwkat == "AGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "Grey", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(ITGA2.15603.20_lgRFU_exprs, Bwkat == "LGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "dodgerblue", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(ITGA2.15603.20_lgRFU_exprs, Bwkat == "SGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "orangered2", linetype = "dashed", size=0.2) +
+  geom_line(data = ITGA2.15603.20_Pred_df_AGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "darkgrey", size=1.5) +
+  geom_line(data = ITGA2.15603.20_Pred_df_LGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "dodgerblue", size=1.5) +
+  geom_line(data = ITGA2.15603.20_Pred_df_SGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "orangered2", size=1.5) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  theme_classic() +
+  xlab("Gestational weeks") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12)) 
+
+ITGA2.15603.20_title <- textGrob("Integrin alpha-2 (ITGA2)", gp = gpar(fontsize = 20))
+
+ITGA2.15603.20_plots <- ggarrange(ITGA2.15603.20_title, ITGA2.15603.20_box, ITGA2.15603.20_corr, ITGA2.15603.20_fitted_line,
+                                ncol = 1, heights = c(0.1, 1.2, 1, 1.2),
+                                labels = c(" ", "A)", "B)", "C)"))
+
+ggsave(filename= "ITGA2.15603.20_plot.png",
+       plot = ITGA2.15603.20_plots,
+       device = "png",
+       path = "../Protein_plots/",
+       width = 25,
+       height = 32,
+       units = "cm",
+       bg = "white")
+
+# TNC.4155.3 --------------------------------------------------------------------
+
+TNC.4155.3_MOM_exprs <- filter(MOM_exprs, grepl(paste("TNC.4155.3", collapse = "|"), AptName)) 
+TNC.4155.3_lgRFU_exprs <- filter(lgRFU_exprs, grepl(paste("TNC.4155.3", collapse = "|"), AptName)) 
+TNC.4155.3_Pred_df_AGA <- filter(Pred_df_AGA, grepl(paste("TNC.4155.3", collapse = "|"), AptName)) 
+TNC.4155.3_Pred_df_LGA <- filter(Pred_df_LGA, grepl(paste("TNC.4155.3", collapse = "|"), AptName)) 
+TNC.4155.3_Pred_df_SGA <- filter(Pred_df_SGA, grepl(paste("TNC.4155.3", collapse = "|"), AptName)) 
+
+TNC.4155.3_box <- ggplot(data = TNC.4155.3_MOM_exprs, aes(factor(x = Bwkat, levels = c("SGA", "AGA", "LGA")), y = MoM, fill = Bwkat)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  theme_classic() +
+  xlab("") +
+  ylab("MoM") +
+  #labs(tag = "A)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12)) +
+  stat_compare_means(method = "t.test", comparisons = compare_list) +
+  facet_wrap(~TimePoint2) 
+
+
+TNC.4155.3_corr <- ggplot(data = TNC.4155.3_MOM_exprs, aes(x = `Birthweight z-score`, y = MoM, color = Bwkat)) +
+  geom_point(alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", group = 1) +
+  stat_cor(method = "pearson", r.digits = 2, p.digits = 2, color = "black", group = 1) +
+  theme_classic() +
+  xlab("Birth weight (z- score)") +
+  ylab("MoM") +
+  #labs(tag = "B)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_text(size = 12),
+        axis.text = element_text(size = 12)) + 
+  facet_wrap(~TimePoint2)
+
+TNC.4155.3_fitted_line <- ggplot(data = TNC.4155.3_lgRFU_exprs, aes(x = GAWeeks, y = lgRFU)) +
+  geom_point(aes(color = Bwkat), alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_line(data = filter(TNC.4155.3_lgRFU_exprs, Bwkat == "AGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "Grey", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(TNC.4155.3_lgRFU_exprs, Bwkat == "LGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "dodgerblue", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(TNC.4155.3_lgRFU_exprs, Bwkat == "SGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "orangered2", linetype = "dashed", size=0.2) +
+  geom_line(data = TNC.4155.3_Pred_df_AGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "darkgrey", size=1.5) +
+  geom_line(data = TNC.4155.3_Pred_df_LGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "dodgerblue", size=1.5) +
+  geom_line(data = TNC.4155.3_Pred_df_SGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "orangered2", size=1.5) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  theme_classic() +
+  xlab("Gestational weeks") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12)) 
+
+TNC.4155.3_title <- textGrob("Tenascin (TNC)", gp = gpar(fontsize = 20))
+
+TNC.4155.3_plots <- ggarrange(TNC.4155.3_title, TNC.4155.3_box, TNC.4155.3_corr, TNC.4155.3_fitted_line,
+                                ncol = 1, heights = c(0.1, 1.2, 1, 1.2),
+                                labels = c(" ", "A)", "B)", "C)"))
+
+ggsave(filename= "TNC.4155.3_plot.png",
+       plot = TNC.4155.3_plots,
+       device = "png",
+       path = "../Protein_plots/",
+       width = 25,
+       height = 32,
+       units = "cm",
+       bg = "white")
+
+# NHEJ1.11351.233 --------------------------------------------------------------------
+
+NHEJ1.11351.233_MOM_exprs <- filter(MOM_exprs, grepl(paste("NHEJ1.11351.233", collapse = "|"), AptName)) 
+NHEJ1.11351.233_lgRFU_exprs <- filter(lgRFU_exprs, grepl(paste("NHEJ1.11351.233", collapse = "|"), AptName)) 
+NHEJ1.11351.233_Pred_df_AGA <- filter(Pred_df_AGA, grepl(paste("NHEJ1.11351.233", collapse = "|"), AptName)) 
+NHEJ1.11351.233_Pred_df_LGA <- filter(Pred_df_LGA, grepl(paste("NHEJ1.11351.233", collapse = "|"), AptName)) 
+NHEJ1.11351.233_Pred_df_SGA <- filter(Pred_df_SGA, grepl(paste("NHEJ1.11351.233", collapse = "|"), AptName)) 
+
+NHEJ1.11351.233_box <- ggplot(data = NHEJ1.11351.233_MOM_exprs, aes(factor(x = Bwkat, levels = c("SGA", "AGA", "LGA")), y = MoM, fill = Bwkat)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  theme_classic() +
+  xlab("") +
+  ylab("MoM") +
+  #labs(tag = "A)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12)) +
+  stat_compare_means(method = "t.test", comparisons = compare_list) +
+  facet_wrap(~TimePoint2) 
+
+
+NHEJ1.11351.233_corr <- ggplot(data = NHEJ1.11351.233_MOM_exprs, aes(x = `Birthweight z-score`, y = MoM, color = Bwkat)) +
+  geom_point(alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", group = 1) +
+  stat_cor(method = "pearson", r.digits = 2, p.digits = 2, color = "black", group = 1) +
+  theme_classic() +
+  xlab("Birth weight (z- score)") +
+  ylab("MoM") +
+  #labs(tag = "B)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_text(size = 12),
+        axis.text = element_text(size = 12)) + 
+  facet_wrap(~TimePoint2)
+
+NHEJ1.11351.233_fitted_line <- ggplot(data = NHEJ1.11351.233_lgRFU_exprs, aes(x = GAWeeks, y = lgRFU)) +
+  geom_point(aes(color = Bwkat), alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_line(data = filter(NHEJ1.11351.233_lgRFU_exprs, Bwkat == "AGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "Grey", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(NHEJ1.11351.233_lgRFU_exprs, Bwkat == "LGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "dodgerblue", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(NHEJ1.11351.233_lgRFU_exprs, Bwkat == "SGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "orangered2", linetype = "dashed", size=0.2) +
+  geom_line(data = NHEJ1.11351.233_Pred_df_AGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "darkgrey", size=1.5) +
+  geom_line(data = NHEJ1.11351.233_Pred_df_LGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "dodgerblue", size=1.5) +
+  geom_line(data = NHEJ1.11351.233_Pred_df_SGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "orangered2", size=1.5) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  theme_classic() +
+  xlab("Gestational weeks") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12)) 
+
+NHEJ1.11351.233_title <- textGrob("Non-homologous end-joining factor 1 (NHEJ1)", gp = gpar(fontsize = 20))
+
+NHEJ1.11351.233_plots <- ggarrange(NHEJ1.11351.233_title, NHEJ1.11351.233_box, NHEJ1.11351.233_corr, NHEJ1.11351.233_fitted_line,
+                                ncol = 1, heights = c(0.1, 1.2, 1, 1.2),
+                                labels = c(" ", "A)", "B)", "C)"))
+
+ggsave(filename= "NHEJ1.11351.233_plot.png",
+       plot = NHEJ1.11351.233_plots,
+       device = "png",
+       path = "../Protein_plots/",
+       width = 25,
+       height = 32,
+       units = "cm",
+       bg = "white")
+
+# C1orf210.8088.56 --------------------------------------------------------------------
+
+TIGIT.9638.2_MOM_exprs <- filter(MOM_exprs, grepl(paste("TIGIT.9638.2", collapse = "|"), AptName)) 
+TIGIT.9638.2_lgRFU_exprs <- filter(lgRFU_exprs, grepl(paste("TIGIT.9638.2", collapse = "|"), AptName)) 
+TIGIT.9638.2_Pred_df_AGA <- filter(Pred_df_AGA, grepl(paste("TIGIT.9638.2", collapse = "|"), AptName)) 
+TIGIT.9638.2_Pred_df_LGA <- filter(Pred_df_LGA, grepl(paste("TIGIT.9638.2", collapse = "|"), AptName)) 
+TIGIT.9638.2_Pred_df_SGA <- filter(Pred_df_SGA, grepl(paste("TIGIT.9638.2", collapse = "|"), AptName)) 
+
+TIGIT.9638.2_box <- ggplot(data = TIGIT.9638.2_MOM_exprs, aes(factor(x = Bwkat, levels = c("SGA", "AGA", "LGA")), y = MoM, fill = Bwkat)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  theme_classic() +
+  xlab("") +
+  ylab("MoM") +
+  #labs(tag = "A)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12)) +
+  stat_compare_means(method = "t.test", comparisons = compare_list) +
+  facet_wrap(~TimePoint2) 
+
+
+TIGIT.9638.2_corr <- ggplot(data = TIGIT.9638.2_MOM_exprs, aes(x = `Birthweight z-score`, y = MoM, color = Bwkat)) +
+  geom_point(alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", group = 1) +
+  stat_cor(method = "pearson", r.digits = 2, p.digits = 2, color = "black", group = 1) +
+  theme_classic() +
+  xlab("Birth weight (z- score)") +
+  ylab("MoM") +
+  #labs(tag = "B)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_text(size = 12),
+        axis.text = element_text(size = 12)) + 
+  facet_wrap(~TimePoint2)
+
+TIGIT.9638.2_fitted_line <- ggplot(data = TIGIT.9638.2_lgRFU_exprs, aes(x = GAWeeks, y = lgRFU)) +
+  geom_point(aes(color = Bwkat), alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_line(data = filter(TIGIT.9638.2_lgRFU_exprs, Bwkat == "AGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "Grey", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(TIGIT.9638.2_lgRFU_exprs, Bwkat == "LGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "dodgerblue", linetype = "dashed", size=0.2) +
+  geom_line(data = filter(TIGIT.9638.2_lgRFU_exprs, Bwkat == "SGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "orangered2", linetype = "dashed", size=0.2) +
+  geom_line(data = TIGIT.9638.2_Pred_df_AGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "darkgrey", size=1.5) +
+  geom_line(data = TIGIT.9638.2_Pred_df_LGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "dodgerblue", size=1.5) +
+  geom_line(data = TIGIT.9638.2_Pred_df_SGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "orangered2", size=1.5) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  theme_classic() +
+  xlab("Gestational weeks") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12)) 
+
+TIGIT.9638.2_title <- textGrob("T-cell immunoreceptor with Ig and ITIM domains (TIGIT)", gp = gpar(fontsize = 20))
+
+TIGIT.9638.2_plots <- ggarrange(TIGIT.9638.2_title, TIGIT.9638.2_box, TIGIT.9638.2_corr, TIGIT.9638.2_fitted_line,
+                                ncol = 1, heights = c(0.1, 1.2, 1, 1.2),
+                                labels = c(" ", "A)", "B)", "C)"))
+
+ggsave(filename= "TIGIT.9638.2_plot.png",
+       plot = TIGIT.9638.2_plots,
+       device = "png",
+       path = "../Scripts_without_PE/Interesting_proteins_withoutPE_DE_overlap/",
+       width = 25,
+       height = 32,
+       units = "cm",
+       bg = "white")
+
+
+# U2AF2.13577.25 --------------------------------------------------------------------
+
+U2AF2.13577.25_MOM_exprs <- filter(MOM_exprs, grepl(paste("U2AF2.13577.25", collapse = "|"), AptName)) 
+U2AF2.13577.25_lgRFU_exprs <- filter(lgRFU_exprs, grepl(paste("U2AF2.13577.25", collapse = "|"), AptName)) 
+U2AF2.13577.25_Pred_df_AGA <- filter(Pred_df_AGA, grepl(paste("U2AF2.13577.25", collapse = "|"), AptName)) 
+U2AF2.13577.25_Pred_df_LGA <- filter(Pred_df_LGA, grepl(paste("U2AF2.13577.25", collapse = "|"), AptName)) 
+U2AF2.13577.25_Pred_df_SGA <- filter(Pred_df_SGA, grepl(paste("U2AF2.13577.25", collapse = "|"), AptName)) 
+
+U2AF2.13577.25_box <- ggplot(data = U2AF2.13577.25_MOM_exprs, aes(factor(x = Bwkat, levels = c("SGA", "AGA", "LGA")), y = MoM, fill = Bwkat)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  theme_classic() +
+  xlab("") +
+  ylab("MoM") +
+  #labs(tag = "A)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) +
+  #ylim(c(-1, 4.5)) +
+  #stat_compare_means(method = "t.test", comparisons = compare_list) +
+  stat_compare_means(method = "wilcox.test", comparisons = compare_list) +
+  facet_wrap(~TimePoint2) 
+
+
+
+U2AF2.13577.25_corr <- ggplot(data = U2AF2.13577.25_MOM_exprs, aes(x = `Birthweight z-score`, y = MoM, color = Bwkat)) +
+  geom_point(alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  #geom_smooth(method = "loess", se = TRUE, color = "black", group = 1) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", group = 1) +
+  #stat_cor(method = "spearman", r.digits = 2, p.digits = 2, color = "black", group = 1) +
+  stat_cor(method = "pearson", r.digits = 2, p.digits = 2, color = "black", group = 1) +
+  theme_classic() +
+  xlab("Birth weight (z- score)") +
+  ylab("MoM") +
+  #labs(tag = "B)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_text(size = 12),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) + 
+  facet_wrap(~TimePoint2)
+
+U2AF2.13577.25_fitted_line <- ggplot(data = U2AF2.13577.25_lgRFU_exprs, aes(x = GAWeeks, y = lgRFU)) +
+  geom_point(aes(color = Bwkat), alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_line(data = filter(U2AF2.13577.25_lgRFU_exprs, Bwkat == "AGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "Grey", linetype = "dashed", size=0.2) +
+  #stat_cor(data = filter(U2AF2.13577.25_lgRFU_exprs, Bwkat == "AGA"), aes(x = GAWeeks, y = lgRFU), method = "spearman", r.digits = 2, p.digits = 2, color = "darkgrey", label.y = 13.0) +
+  geom_line(data = filter(U2AF2.13577.25_lgRFU_exprs, Bwkat == "LGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "dodgerblue", linetype = "dashed", size=0.2) +
+  #stat_cor(data = filter(U2AF2.13577.25_lgRFU_exprs, Bwkat == "LGA"), aes(x = GAWeeks, y = lgRFU), method = "pearson", r.digits = 2, p.digits = 2, color = "dodgerblue", label.y = 12.7) +
+  geom_line(data = filter(U2AF2.13577.25_lgRFU_exprs, Bwkat == "SGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "orangered2", linetype = "dashed", size=0.2) +
+  #stat_cor(data = filter(U2AF2.13577.25_lgRFU_exprs, Bwkat == "SGA"), aes(x = GAWeeks, y = lgRFU), method = "pearson", r.digits = 2, p.digits = 2, color = "orangered2", label.y = 12.4) +
+  geom_line(data = U2AF2.13577.25_Pred_df_AGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "darkgrey", size=1.5) +
+  geom_line(data = U2AF2.13577.25_Pred_df_LGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "dodgerblue", size=1.5) +
+  geom_line(data = U2AF2.13577.25_Pred_df_SGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "orangered2", size=1.5) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  theme_classic() +
+  xlab("Gestational weeks") +
+  #labs(tag = "C)") +
+  theme(legend.title = element_blank(),
+        #legend.text = element_text(size=15),
+        #legend.key.size = unit(2, "cm"),
+        strip.text = element_text(size = 10),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13))
+
+U2AF2.13577.25_title <- textGrob("Splicing factor U2AF 65 kDa subunit (U2AF2)", gp = gpar(fontsize = 20))
+
+U2AF2.13577.25_plots <- ggarrange(U2AF2.13577.25_title, U2AF2.13577.25_box, U2AF2.13577.25_corr, U2AF2.13577.25_fitted_line,
+                                 ncol = 1, heights = c(0.1, 1.2, 1, 1.2),
+                                 labels = c(" ", "A)", "B)", "C)"),
+                                 font.label = list(size = 20))
+
+ggsave(filename= "U2AF2.13577.25_plot.png",
+       plot = U2AF2.13577.25_plots,
+       device = "png",
+       path = "../Protein_plots/",
+       width = 25,
+       height = 32,
+       units = "cm",
+       bg = "white")
+
+# MSTN.14583.49 --------------------------------------------------------------------
+
+MSTN.14583.49_MOM_exprs <- filter(MOM_exprs, grepl(paste("MSTN.14583.49", collapse = "|"), AptName)) 
+MSTN.14583.49_lgRFU_exprs <- filter(lgRFU_exprs, grepl(paste("MSTN.14583.49", collapse = "|"), AptName)) 
+MSTN.14583.49_Pred_df_AGA <- filter(Pred_df_AGA, grepl(paste("MSTN.14583.49", collapse = "|"), AptName)) 
+MSTN.14583.49_Pred_df_LGA <- filter(Pred_df_LGA, grepl(paste("MSTN.14583.49", collapse = "|"), AptName)) 
+MSTN.14583.49_Pred_df_SGA <- filter(Pred_df_SGA, grepl(paste("MSTN.14583.49", collapse = "|"), AptName)) 
+
+MSTN.14583.49_box <- ggplot(data = MSTN.14583.49_MOM_exprs, aes(factor(x = Bwkat, levels = c("SGA", "AGA", "LGA")), y = MoM, fill = Bwkat)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  theme_classic() +
+  xlab("") +
+  ylab("MoM") +
+  #labs(tag = "A)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) +
+  #ylim(c(-1, 4.5)) +
+  #stat_compare_means(method = "t.test", comparisons = compare_list) +
+  stat_compare_means(method = "wilcox.test", comparisons = compare_list) +
+  facet_wrap(~TimePoint2) 
+
+
+
+MSTN.14583.49_corr <- ggplot(data = MSTN.14583.49_MOM_exprs, aes(x = `Birthweight z-score`, y = MoM, color = Bwkat)) +
+  geom_point(alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  #geom_smooth(method = "loess", se = TRUE, color = "black", group = 1) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", group = 1) +
+  #stat_cor(method = "spearman", r.digits = 2, p.digits = 2, color = "black", group = 1) +
+  stat_cor(method = "pearson", r.digits = 2, p.digits = 2, color = "black", group = 1) +
+  theme_classic() +
+  xlab("Birth weight (z- score)") +
+  ylab("MoM") +
+  #labs(tag = "B)") +
+  theme(legend.title = element_blank(),
+        strip.text = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_text(size = 12),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13)) + 
+  facet_wrap(~TimePoint2)
+
+MSTN.14583.49_fitted_line <- ggplot(data = MSTN.14583.49_lgRFU_exprs, aes(x = GAWeeks, y = lgRFU)) +
+  geom_point(aes(color = Bwkat), alpha = 0.8) +
+  scale_color_manual(values = c("Grey", "dodgerblue", "orangered2")) +
+  geom_line(data = filter(MSTN.14583.49_lgRFU_exprs, Bwkat == "AGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "Grey", linetype = "dashed", size=0.2) +
+  #stat_cor(data = filter(MSTN.14583.49_lgRFU_exprs, Bwkat == "AGA"), aes(x = GAWeeks, y = lgRFU), method = "spearman", r.digits = 2, p.digits = 2, color = "darkgrey", label.y = 13.0) +
+  geom_line(data = filter(MSTN.14583.49_lgRFU_exprs, Bwkat == "LGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "dodgerblue", linetype = "dashed", size=0.2) +
+  #stat_cor(data = filter(MSTN.14583.49_lgRFU_exprs, Bwkat == "LGA"), aes(x = GAWeeks, y = lgRFU), method = "pearson", r.digits = 2, p.digits = 2, color = "dodgerblue", label.y = 12.7) +
+  geom_line(data = filter(MSTN.14583.49_lgRFU_exprs, Bwkat == "SGA"), aes(x = GAWeeks, y = lgRFU, group = ID), color = "orangered2", linetype = "dashed", size=0.2) +
+  #stat_cor(data = filter(MSTN.14583.49_lgRFU_exprs, Bwkat == "SGA"), aes(x = GAWeeks, y = lgRFU), method = "pearson", r.digits = 2, p.digits = 2, color = "orangered2", label.y = 12.4) +
+  geom_line(data = MSTN.14583.49_Pred_df_AGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "darkgrey", size=1.5) +
+  geom_line(data = MSTN.14583.49_Pred_df_LGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "dodgerblue", size=1.5) +
+  geom_line(data = MSTN.14583.49_Pred_df_SGA, aes(x = GAWeeks, y = pred), linetype = "solid", color = "orangered2", size=1.5) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  theme_classic() +
+  xlab("Gestational weeks") +
+  #labs(tag = "C)") +
+  theme(legend.title = element_blank(),
+        #legend.text = element_text(size=15),
+        #legend.key.size = unit(2, "cm"),
+        strip.text = element_text(size = 10),
+        axis.title = element_text(size = 15),
+        axis.text = element_text(size = 12),
+        legend.key.height = unit(0.8, "cm"),
+        legend.key.width = unit(0.8, "cm"),
+        legend.text = element_text(size = 13))
+
+MSTN.14583.49_title <- textGrob("Myostatin (MSTN)", gp = gpar(fontsize = 20))
+
+MSTN.14583.49_plots <- ggarrange(MSTN.14583.49_title, MSTN.14583.49_box, MSTN.14583.49_corr, MSTN.14583.49_fitted_line,
+                                 ncol = 1, heights = c(0.1, 1.2, 1, 1.2),
+                                 labels = c(" ", "A)", "B)", "C)"),
+                                 font.label = list(size = 20))
+
+ggsave(filename= "MSTN.14583.49_plot.png",
+       plot = MSTN.14583.49_plots,
+       device = "png",
+       path = "../Protein_plots/",
+       width = 25,
+       height = 32,
+       units = "cm",
+       bg = "white")
