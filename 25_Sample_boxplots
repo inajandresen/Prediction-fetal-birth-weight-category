@@ -1,0 +1,441 @@
+library(tidyverse)
+library(Biobase)
+library(reshape2)
+library(scales)
+library(limma)
+library(gridExtra)
+
+
+
+# LgRFU samples -----------------------------------
+
+#Plot bokplots of lgRFU data
+load("../Data/winslgRFU_exprset_STORK_SGA_LGA.RData")
+prot <- fData(winslgRFU_exprset_STORK_LGA_SGA)
+samp <- pData(winslgRFU_exprset_STORK_LGA_SGA)
+table(samp$Bwkat)
+lgRFU <- exprs(winslgRFU_exprset_STORK_LGA_SGA)
+
+lgRFU_melt <- melt(lgRFU)
+colnames(lgRFU_melt) <- c("AptName", "SampleID", "lgRFU")
+
+#Sample annotation
+samp <- samp %>%
+  select(Bwkat, TimePoint) %>%
+  rownames_to_column(var = "SampleID")
+
+lgRFU_melt_samp <- merge(lgRFU_melt, samp, by = "SampleID")
+lgRFU_melt_samp$TimePoint <- gsub("1", "T1", lgRFU_melt_samp$TimePoint)
+lgRFU_melt_samp$TimePoint <- gsub("2", "T2", lgRFU_melt_samp$TimePoint)
+lgRFU_melt_samp$TimePoint <- gsub("3", "T3", lgRFU_melt_samp$TimePoint)
+lgRFU_melt_samp$TimePoint <- as.character(lgRFU_melt_samp$TimePoint)
+
+
+save(lgRFU_melt_samp, file = "../Data/winslgRFU_melt_samp.RData")
+load("../Data/winslgRFU_melt_samp.RData")
+
+#Plot and color by SGA, AGA and LGA
+lgRFU_melt_samp$Bwkat <- as.factor(lgRFU_melt_samp$Bwkat)
+ordered_data_bwkat <- lgRFU_melt_samp[order(lgRFU_melt_samp$Bwkat),]
+lgRFU_melt_samp$SampleID <- factor(lgRFU_melt_samp$SampleID, levels = unique(ordered_data_bwkat$SampleID))
+
+
+#Mark wich proteins to plot
+lgRFU_melt_samp$Visible <- NA
+lgRFU_melt_samp$Visible <- ifelse(lgRFU_melt_samp$AptName %in% "SAA1.15515.2", "SAA1", lgRFU_melt_samp$Visible)
+#lgRFU_melt_samp$Visible <- ifelse(lgRFU_melt_samp$AptName %in% "FAAH2.8396.42", "FAAH2", lgRFU_melt_samp$Visible)
+
+
+
+lgRFU_box <- ggplot(lgRFU_melt_samp, aes(x = SampleID, y = lgRFU, fill = Bwkat)) +
+  geom_boxplot() +
+  geom_point(data = filter(lgRFU_melt_samp, AptName %in% c("SAA1.15515.2")), 
+             aes(color=factor(Visible))) +
+  guides(colour = guide_legend(override.aes = list(size=10))) +
+  scale_color_manual(values = c("AGA" = "Grey", "LGA" =  "dodgerblue", "SGA" = "orangered2", "SAA1"  = "yellow")) +
+  labs(title = "Raw data (STORK)") + 
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5, size = 30),
+        axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(size = 30),
+        axis.text.y = element_text(size = 25),
+        legend.position = "right",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 25),
+        legend.key.size = unit(5, 'cm'), #change legend key size
+        legend.key.height = unit(3, 'cm'), #change legend key height
+        legend.key.width = unit(3, 'cm')) +
+  facet_wrap(~TimePoint)
+
+ggsave(filename= "Sample_box_plots_SAA1.png",
+       plot = lgRFU_box,
+       device = "png",
+       path = "../Sample_box_plots",
+       #width = 60,
+       width = 90,
+       height = 10,
+       #height = 90,
+       units = "cm")
+
+
+
+T1_lgRFU_melt_samp <- filter(lgRFU_melt_samp, TimePoint %in% "T1")
+
+T1_lgRFU_box <- ggplot(T1_lgRFU_melt_samp, aes(x = SampleID, y = lgRFU, fill = Bwkat)) +
+  geom_boxplot() +
+  geom_point(data = filter(T1_lgRFU_melt_samp, AptName %in% c("SAA1.15515.2")), 
+             aes(color=factor(Visible))) +
+  guides(colour = guide_legend(override.aes = list(size=10))) +
+  scale_color_manual(values = c("AGA" = "Grey", "LGA" =  "dodgerblue", "SGA" = "orangered2", "SAA1"  = "deeppink")) +
+  labs(title = "T1 Raw data") + 
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5, size = 30),
+        axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(size = 30),
+        axis.text.y = element_text(size = 25),
+        legend.position = "none",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 25),
+        legend.key.size = unit(5, 'cm'), #change legend key size
+        legend.key.height = unit(3, 'cm'), #change legend key height
+        legend.key.width = unit(3, 'cm')) 
+
+T2_lgRFU_melt_samp <- filter(lgRFU_melt_samp, TimePoint %in% "T2")
+
+T2_lgRFU_box <- ggplot(T2_lgRFU_melt_samp, aes(x = SampleID, y = lgRFU, fill = Bwkat)) +
+  geom_boxplot() +
+  geom_point(data = filter(T2_lgRFU_melt_samp, AptName %in% c("SAA1.15515.2")), 
+             aes(color=factor(Visible))) +
+  guides(colour = guide_legend(override.aes = list(size=10))) +
+  scale_color_manual(values = c("AGA" = "Grey", "LGA" =  "dodgerblue", "SGA" = "orangered2", "SAA1"  = "deeppink")) +
+  labs(title = "T2 Raw data") + 
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5, size = 30),
+        axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(size = 30),
+        axis.text.y = element_text(size = 25),
+        legend.position = "none",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 25),
+        legend.key.size = unit(5, 'cm'), #change legend key size
+        legend.key.height = unit(3, 'cm'), #change legend key height
+        legend.key.width = unit(3, 'cm')) 
+
+T3_lgRFU_melt_samp <- filter(lgRFU_melt_samp, TimePoint %in% "T3")
+
+T3_lgRFU_box <- ggplot(T3_lgRFU_melt_samp, aes(x = SampleID, y = lgRFU, fill = Bwkat)) +
+  geom_boxplot() +
+  geom_point(data = filter(T3_lgRFU_melt_samp, AptName %in% c("SAA1.15515.2")), 
+             aes(color=factor(Visible))) +
+  guides(colour = guide_legend(override.aes = list(size=10))) +
+  scale_color_manual(values = c("AGA" = "Grey", "LGA" =  "dodgerblue", "SGA" = "orangered2", "SAA1"  = "deeppink")) +
+  labs(title = "T3 Raw data") + 
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5, size = 30),
+        axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(size = 30),
+        axis.text.y = element_text(size = 25),
+        legend.position = "none",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 25),
+        legend.key.size = unit(5, 'cm'), #change legend key size
+        legend.key.height = unit(3, 'cm'), #change legend key height
+        legend.key.width = unit(3, 'cm')) 
+
+
+get_legend <-function(myggplot){
+  tmp <- ggplot_gtable(ggplot_build(myggplot))
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  return(legend)
+}
+
+lgRFU_box <- ggplot(T3_lgRFU_melt_samp, aes(x = SampleID, y = lgRFU, fill = Bwkat)) +
+  geom_boxplot() +
+  geom_point(data = filter(T3_lgRFU_melt_samp, AptName %in% c("SAA1.15515.2")), 
+             aes(color=factor(Visible))) +
+  guides(colour = guide_legend(override.aes = list(size=10))) +
+  scale_color_manual(values = c("AGA" = "Grey", "LGA" =  "dodgerblue", "SGA" = "orangered2", "SAA1"  = "deeppink")) +
+  labs(title = "T3 Raw data") + 
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5, size = 30),
+        axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(size = 30),
+        axis.text.y = element_text(size = 25),
+        legend.position = "right",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 25),
+        legend.key.size = unit(5, 'cm'), #change legend key size
+        legend.key.height = unit(3, 'cm'), #change legend key height
+        legend.key.width = unit(3, 'cm')) 
+
+legend <- get_legend(lgRFU_box)
+
+
+#Combine the plots and the legend
+plots <- grid.arrange(T1_lgRFU_box, T2_lgRFU_box, T3_lgRFU_box, legend, 
+                      ncol = 4, nrow = 1, widths = c(1, 1, 1, 0.4)) 
+
+ggsave(filename= "Sample_box_plots_SAA1.png",
+       plot = plots,
+       device = "png",
+       path = "../Sample_box_plots",
+       #width = 60,
+       width = 90,
+       height = 20,
+       #height = 90,
+       units = "cm")
+
+
+# ANML normalized ---------------------------------------------------------
+sample_ID <- colnames(winslgRFU_exprset_STORK_LGA_SGA)
+samp <- pData(winslgRFU_exprset_STORK_LGA_SGA)
+samp <- samp %>%
+  select(Bwkat) %>%
+  rownames_to_column(var = "SampleID")
+prot <- fData(winslgRFU_exprset_STORK_LGA_SGA)
+
+load("../lgRFU_eset_ANML.RData")
+samp_anml <- pData(lgRFU_eset_ANML)
+samp_anml <- samp_anml %>%
+  rownames_to_column(var = "SampleID")
+samp_anml_filtered <- subset(samp_anml, SampleID %in% sample_ID)
+samp_anml_filtered <- merge(samp, samp_anml_filtered, by = "SampleID")
+samp_anml_filtered <- samp_anml_filtered %>%
+  remove_rownames() %>%
+  column_to_rownames(var = "SampleID")
+
+exprs_anml <- exprs(lgRFU_eset_ANML)
+exprs_anml <- exprs_anml %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "SampleID")
+exprs_anml_filtered <- subset(exprs_anml, SampleID %in% sample_ID)
+exprs_anml_filtered <- exprs_anml_filtered %>%
+  remove_rownames() %>%
+  column_to_rownames(var = "SampleID") %>%
+  t()
+exprs_anml_filtered2 <- exprs_anml_filtered %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "AptName")
+exprs_anml_filtered2 <- exprs_anml_filtered2[order(exprs_anml_filtered2$AptName),]
+exprs_anml_filtered2 <- exprs_anml_filtered2 %>%
+  remove_rownames() %>%
+  column_to_rownames(var = "AptName") %>%
+  as.matrix
+
+prot_sorted <- prot[order(prot$AptName),]
+
+lgRFU_exprset_STORK_LGA_SGA_ANML <- ExpressionSet(exprs_anml_filtered2, phenoData = AnnotatedDataFrame(samp_anml_filtered), featureData = AnnotatedDataFrame(prot_sorted))
+
+
+colnames(lgRFU_eset_ANML)
+
+prot_ANML <- fData(lgRFU_eset_ANML)
+
+#Filter 4V samples
+ANML_lgRFU_exprset_STORK <- lgRFU_eset_ANML[, (pData(lgRFU_eset_ANML)$STORK %in% "TRUE")]              
+ANML_lgRFU_STORK <- exprs(ANML_lgRFU_exprset_STORK)
+
+
+ANML_lgRFU_STORK_melt <- melt(ANML_lgRFU_STORK)
+colnames(ANML_lgRFU_STORK_melt) <- c("AptName", "SampleID", "lgRFU")
+
+#Sample annotation
+ANML_samp_STORK <- pData(ANML_lgRFU_exprset_STORK)
+ANML_samp_STORK <- ANML_samp_STORK %>%
+  select(PE, Timepoint) %>%
+  rownames_to_column(var = "SampleID")
+
+ANML_lgRFU_melt_samp <- merge(ANML_lgRFU_STORK_melt, ANML_samp_STORK, by = "SampleID")
+ANML_lgRFU_melt_samp$PE <- gsub("1", "PE", ANML_lgRFU_melt_samp$PE)
+ANML_lgRFU_melt_samp$PE <- gsub("0", "Control", ANML_lgRFU_melt_samp$PE)
+ANML_lgRFU_melt_samp$Timepoint <- gsub("1", "T1", ANML_lgRFU_melt_samp$Timepoint)
+ANML_lgRFU_melt_samp$Timepoint <- gsub("2", "T2", ANML_lgRFU_melt_samp$Timepoint)
+ANML_lgRFU_melt_samp$Timepoint <- gsub("3", "T3", ANML_lgRFU_melt_samp$Timepoint)
+ANML_lgRFU_melt_samp$Timepoint <- as.character(ANML_lgRFU_melt_samp$Timepoint)
+
+save(ANML_lgRFU_melt_samp, file = "K:/Sensitivt/Forskning/2012-5678_Placenta/Proteomics/Adhesion molecules/IJA_plots/ANML_lgRFU_melt_samp.RData")
+#load("K:/Sensitivt/Forskning/2012-5678_Placenta/Proteomics/Adhesion molecules/IJA_plots/ANML_lgRFU_melt_samp.RData")
+
+#Plot and color by Control and PE 
+ANML_lgRFU_melt_samp$PE <- as.factor(ANML_lgRFU_melt_samp$PE)
+ordered_data_PE <- ANML_lgRFU_melt_samp[order(ANML_lgRFU_melt_samp$PE),]
+ANML_lgRFU_melt_samp$SampleID <- factor(ANML_lgRFU_melt_samp$SampleID, levels = unique(ordered_data_PE$SampleID))
+
+#Mark wich proteins to plot
+ANML_lgRFU_melt_samp$Visible <- NA
+ANML_lgRFU_melt_samp$Visible <- ifelse(ANML_lgRFU_melt_samp$AptName %in% "seq.13717.15", "FCN2", ANML_lgRFU_melt_samp$Visible)
+ANML_lgRFU_melt_samp$Visible <- ifelse(ANML_lgRFU_melt_samp$AptName %in% "seq.8396.42", "FAAH2", ANML_lgRFU_melt_samp$Visible)
+
+
+
+ANML_lgRFU_box <- ggplot(ANML_lgRFU_melt_samp, aes(x = SampleID, y = lgRFU, fill = PE)) +
+  geom_boxplot() +
+  geom_point(data = filter(ANML_lgRFU_melt_samp, AptName %in% c("seq.13717.15", "seq.8396.42")), 
+             aes(color=factor(Visible))) +
+  guides(colour = guide_legend(override.aes = list(size=10))) +
+  scale_color_manual(values = c("FCN2"  = "yellow", "FAAH2" = "deeppink")) +
+  labs(title = "ANML normalized (STORK)") + 
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5, size = 30),
+        axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(size = 30),
+        axis.text.y = element_text(size = 25),
+        legend.position = "right",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 25),
+        legend.key.size = unit(5, 'cm'), #change legend key size
+        legend.key.height = unit(3, 'cm'), #change legend key height
+        legend.key.width = unit(3, 'cm')) +
+  facet_wrap(~Timepoint)
+
+T1_ANML_lgRFU_melt_samp <- filter(ANML_lgRFU_melt_samp, Timepoint %in% "T1")
+
+T1_ANML_lgRFU_box <- ggplot(T1_ANML_lgRFU_melt_samp, aes(x = SampleID, y = lgRFU, fill = PE)) +
+  geom_boxplot() +
+  geom_point(data = filter(T1_ANML_lgRFU_melt_samp, AptName %in% c("seq.13717.15", "seq.8396.42")), 
+             aes(color=factor(Visible))) +
+  guides(colour = guide_legend(override.aes = list(size=10))) +
+  scale_color_manual(values = c("FCN2"  = "yellow", "FAAH2" = "deeppink")) +
+  labs(title = "T1 ANML normalized") + 
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5, size = 30),
+        axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(size = 30),
+        axis.text.y = element_text(size = 25),
+        legend.position = "none",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 25),
+        legend.key.size = unit(5, 'cm'), #change legend key size
+        legend.key.height = unit(3, 'cm'), #change legend key height
+        legend.key.width = unit(3, 'cm')) 
+
+T2_ANML_lgRFU_melt_samp <- filter(ANML_lgRFU_melt_samp, Timepoint %in% "T2")
+
+T2_ANML_lgRFU_box <- ggplot(T2_ANML_lgRFU_melt_samp, aes(x = SampleID, y = lgRFU, fill = PE)) +
+  geom_boxplot() +
+  geom_point(data = filter(T2_ANML_lgRFU_melt_samp, AptName %in% c("seq.13717.15", "seq.8396.42")), 
+             aes(color=factor(Visible))) +
+  guides(colour = guide_legend(override.aes = list(size=10))) +
+  scale_color_manual(values = c("FCN2"  = "yellow", "FAAH2" = "deeppink")) +
+  labs(title = "T2 ANML normalized") + 
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5, size = 30),
+        axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(size = 30),
+        axis.text.y = element_text(size = 25),
+        legend.position = "none",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 25),
+        legend.key.size = unit(5, 'cm'), #change legend key size
+        legend.key.height = unit(3, 'cm'), #change legend key height
+        legend.key.width = unit(3, 'cm')) 
+
+
+
+T3_ANML_lgRFU_melt_samp <- filter(ANML_lgRFU_melt_samp, Timepoint %in% "T3")
+
+T3_ANML_lgRFU_box <- ggplot(T3_ANML_lgRFU_melt_samp, aes(x = SampleID, y = lgRFU, fill = PE)) +
+  geom_boxplot() +
+  geom_point(data = filter(T3_ANML_lgRFU_melt_samp, AptName %in% c("seq.13717.15", "seq.8396.42")), 
+             aes(color=factor(Visible))) +
+  guides(colour = guide_legend(override.aes = list(size=10))) +
+  scale_color_manual(values = c("FCN2"  = "yellow", "FAAH2" = "deeppink")) +
+  labs(title = "T3 ANML normalized") + 
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5, size = 30),
+        axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(size = 30),
+        axis.text.y = element_text(size = 25),
+        legend.position = "none",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 25),
+        legend.key.size = unit(5, 'cm'), #change legend key size
+        legend.key.height = unit(3, 'cm'), #change legend key height
+        legend.key.width = unit(3, 'cm')) 
+
+
+#Combine the plots and the legend
+plots <- grid.arrange(lgRFU_box, mednorm_lgRFU_box, MADnorm_lgRFU_box, ANML_lgRFU_box, 
+                      ncol = 1, nrow = 4) 
+
+
+ggsave(filename= "Sample_box_plots_STORK_FAAH2_FCN2.png",
+       plot = plots,
+       device = "png",
+       path = "K:/Sensitivt/Forskning/2012-5678_Placenta/Proteomics/Adhesion molecules/IJA_plots",
+       #width = 60,
+       width = 90,
+       height = 60,
+       #height = 90,
+       units = "cm")
+
+
+get_legend <-function(myggplot){
+  tmp <- ggplot_gtable(ggplot_build(myggplot))
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  return(legend)
+}
+
+lgRFU_box <- ggplot(lgRFU_melt_samp, aes(x = SampleID, y = lgRFU, fill = PE)) +
+  geom_boxplot() +
+  geom_point(data = filter(lgRFU_melt_samp, AptName %in% c("FCN2.13717.15", "FAAH2.8396.42")), 
+             aes(color=factor(Visible))) +
+  guides(colour = guide_legend(override.aes = list(size=10))) +
+  scale_color_manual(values = c("FCN2"  = "yellow", "FAAH2" = "deeppink")) +
+  labs(title = "Raw data (STORK)") + 
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5, size = 30),
+        axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(size = 30),
+        axis.text.y = element_text(size = 25),
+        legend.position = "right",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 25),
+        legend.key.size = unit(5, 'cm'), #change legend key size
+        legend.key.height = unit(3, 'cm'), #change legend key height
+        legend.key.width = unit(3, 'cm')) +
+  facet_wrap(~TimePoint)
+
+legend <- get_legend(lgRFU_box)
+
+#Combine the plots and the legend
+plots2 <- grid.arrange(T1_lgRFU_box, T2_lgRFU_box, T3_lgRFU_box, legend, 
+                       T1_mednorm_lgRFU_box, T2_mednorm_lgRFU_box, T3_mednorm_lgRFU_box, legend, 
+                       T1_MADnorm_lgRFU_box, T2_MADnorm_lgRFU_box, T3_MADnorm_lgRFU_box, legend,
+                       T1_ANML_lgRFU_box, T2_ANML_lgRFU_box, T3_ANML_lgRFU_box, legend,
+                       ncol = 4, nrow = 4,
+                       widths = c(1, 1, 1, 0.3)) 
+
+ggsave(filename= "Sample_box_plots_STORK_FAAH2_FCN2.png",
+       plot = plots2,
+       device = "png",
+       path = "../IJA_plots",
+       #width = 60,
+       width = 90,
+       height = 60,
+       #height = 90,
+       units = "cm")
+
