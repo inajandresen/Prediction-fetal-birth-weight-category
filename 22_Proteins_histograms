@@ -1,0 +1,198 @@
+library(tidyverse)
+library(readxl)
+library(gridExtra)
+library(ggvenn)
+library(ggpubr)
+library(reshape2)
+library(reshape)
+library(ggforce)
+library(Biobase)
+library(splines)
+library(mgcv)
+library(psych)
+
+
+# Extract list of proteins  -----------------------------------------------
+#DE analysis 
+T1_SGAvsAGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T1_SGA_AGA_adj_nulli_bmi.xlsx")
+T1_SGAvsAGA_sig <- T1_SGAvsAGA %>%
+  filter(adj.P.Val < 0.05) 
+
+T2_SGAvsAGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T2_SGA_AGA_adj_nulli_bmi.xlsx")
+T2_SGAvsAGA_sig <- T2_SGAvsAGA %>%
+  filter(adj.P.Val < 0.05)
+
+T3_SGAvsAGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T3_SGA_AGA_adj_nulli_bmi.xlsx")
+T3_SGAvsAGA_sig <- T3_SGAvsAGA %>%
+  filter(adj.P.Val < 0.05)
+
+T1_LGAvsAGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T1_LGA_AGA_adj_nulli_bmi.xlsx")
+T1_LGAvsAGA_sig <- T1_LGAvsAGA %>%
+  filter(adj.P.Val < 0.05) %>%
+  slice_head(n = 10)
+
+T2_LGAvsAGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T2_LGA_AGA_adj_nulli_bmi.xlsx")
+T2_LGAvsAGA_sig <- T2_LGAvsAGA %>%
+  filter(adj.P.Val < 0.05) %>%
+  slice_head(n = 10)
+
+T3_LGAvsAGA <- read_excel("../Limma_groups/Adjust_BMI_nulli/T3_LGA_AGA_adj_nulli_bmi.xlsx")
+T3_LGAvsAGA_sig <- T3_LGAvsAGA %>%
+  filter(adj.P.Val < 0.05) %>%
+  slice_head(n = 10)
+
+sig_DE_proteins <- c(T1_SGAvsAGA_sig$AptName, T2_SGAvsAGA_sig$AptName, T3_SGAvsAGA_sig$AptName, 
+                     T1_LGAvsAGA_sig$AptName, T2_LGAvsAGA_sig$AptName, T3_LGAvsAGA_sig$AptName, "EPO.5813.58")
+
+sig_DE_proteins <- unique(sig_DE_proteins)
+
+
+rm(T1_SGAvsAGA, T1_SGAvsAGA_sig, T2_SGAvsAGA, T2_SGAvsAGA_sig, T3_SGAvsAGA, T3_SGAvsAGA_sig,
+   T1_LGAvsAGA, T1_LGAvsAGA_sig, T2_LGAvsAGA, T2_LGAvsAGA_sig, T3_LGAvsAGA, T3_LGAvsAGA_sig)
+
+# Format dataset ----------------------------------------------------------
+load("../Data/MOM_exprset_STORK_SGA_LGA.RData")
+load("../Data/winslgRFU_exprset_STORK_SGA_LGA.RData")
+
+MOM_exprs <- exprs(MoM_exprset_STORK_LGA_SGA)
+lgRFU_exprs <- exprs(winslgRFU_exprset_STORK_LGA_SGA)
+prot <- fData(MoM_exprset_STORK_LGA_SGA)
+samp <- pData(MoM_exprset_STORK_LGA_SGA)
+
+#Format the expression matrix
+MOM_exprs <- melt(MOM_exprs)
+colnames(MOM_exprs) <- c("AptName", "SampleID", "MoM")
+lgRFU_exprs <- melt(lgRFU_exprs)
+colnames(lgRFU_exprs) <- c("AptName", "SampleID", "lgRFU")
+
+
+#Format the samp data
+samp <- samp %>%
+  select(TimePoint, GAWeeks, Bwkat, `Birthweight z-score`, BMI, Nulliparity, PE, ID) %>%
+  rownames_to_column(var = "SampleID")
+
+samp$TimePoint2 <- samp$TimePoint
+samp$TimePoint2 <- gsub("1", "Visit 1", samp$TimePoint2)
+samp$TimePoint2 <- gsub("2", "Visit 2", samp$TimePoint2)
+samp$TimePoint2 <- gsub("3", "Visit 3", samp$TimePoint2)
+
+#Merge expression data and samp
+MOM_exprs <- merge(samp, MOM_exprs, by = "SampleID")
+lgRFU_exprs <- merge(samp, lgRFU_exprs, by = "SampleID")
+
+#Select the relevant columns from prot
+prot <- prot %>%
+  select(SomaId, TargetFullName, AptName, EntrezGeneSymbol)
+
+prot <- prot %>%
+  mutate(EntrezGeneSymbol2 = paste0("(", EntrezGeneSymbol,  ")"))
+prot$TargetFullName_EntrezGeneSymbol <- paste(prot$TargetFullName, prot$EntrezGeneSymbol2)
+
+#Merge expression data and prot
+MOM_exprs <- merge(prot, MOM_exprs, by = "AptName")
+lgRFU_exprs <- merge(prot, lgRFU_exprs, by = "AptName")
+
+
+#Merge TargetFullName_EntrezGeneSymbol with TimePoint2
+MOM_exprs$TargetFullName_EntrezGeneSymbol_TimePoint <- paste(MOM_exprs$TargetFullName_EntrezGeneSymbol, MOM_exprs$TimePoint2)
+
+MOM_exprs <- filter(MOM_exprs, grepl(paste(sig_DE_proteins, collapse = "|"), AptName)) 
+
+# Hist all  ---------------------------------------------------------------
+
+hist <- ggplot(data = MOM_exprs, aes(x = MoM)) +
+  geom_histogram(binwidth = 0.5, fill = "#00BA38", color = "#00BA38", alpha = 0.7) +
+  ggtitle("MYL5") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.text.y = element_text(size = 12),
+        axis.text.x = element_text(size = 10)) +
+  #ylab("No. patients") +
+  #xlab("Weeks of gestation") +
+  ylab("") +
+  xlab("") +
+  facet_wrap(~EntrezGeneSymbol, ncol = 4)
+
+ggsave(filename= "Histograms_MoM.png",
+       plot = hist,
+       device = "png",
+       path = "../Protein_plots/",
+       width = 25,
+       height = 32,
+       units = "cm",
+       bg = "white")
+
+
+
+# MYL5.19286.30 --------------------------------------------------------------------
+
+MYL5.19286.30_MOM_exprs <- filter(MOM_exprs, grepl(paste("MYL5.19286.30", collapse = "|"), AptName)) 
+MYL5.19286.30_lgRFU_exprs <- filter(lgRFU_exprs, grepl(paste("MYL5.19286.30", collapse = "|"), AptName)) 
+
+MYL5.19286.30_hist_trim <- ggplot(data = MYL5.19286.30_MOM_exprs, aes(x = MoM)) +
+  geom_histogram(binwidth = 0.5, fill = "#00BA38", color = "#00BA38", alpha = 0.7) +
+  ggtitle("MYL5") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.text.y = element_text(size = 12),
+        axis.text.x = element_text(size = 10)) +
+  #ylab("No. patients") +
+  #xlab("Weeks of gestation") +
+  ylab("") +
+  xlab("") 
+
+# NFKBIA.19209.6 --------------------------------------------------------------------
+
+NFKBIA.19209.6_MOM_exprs <- filter(MOM_exprs, grepl(paste("NFKBIA.19209.6", collapse = "|"), AptName)) 
+NFKBIA.19209.6_lgRFU_exprs <- filter(lgRFU_exprs, grepl(paste("NFKBIA.19209.6", collapse = "|"), AptName)) 
+
+NFKBIA.19209.6_hist_trim <- ggplot(data = NFKBIA.19209.6_MOM_exprs, aes(x = MoM)) +
+  geom_histogram(binwidth = 0.5, fill = "#00BA38", color = "#00BA38", alpha = 0.7) +
+  ggtitle("NFKBIA") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.text.y = element_text(size = 12),
+        axis.text.x = element_text(size = 10)) +
+  #ylab("No. patients") +
+  #xlab("Weeks of gestation") +
+  ylab("") +
+  xlab("") 
+
+
+# EPO.5813.58 --------------------------------------------------------------------
+
+EPO.5813.58_MOM_exprs <- filter(MOM_exprs, grepl(paste("EPO.5813.58", collapse = "|"), AptName)) 
+EPO.5813.58_lgRFU_exprs <- filter(lgRFU_exprs, grepl(paste("EPO.5813.58", collapse = "|"), AptName)) 
+
+EPO.5813.58_hist_trim <- ggplot(data = EPO.5813.58_MOM_exprs, aes(x = MoM)) +
+  geom_histogram(binwidth = 0.5, fill = "#00BA38", color = "#00BA38", alpha = 0.7) +
+  ggtitle("EPO") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.text.y = element_text(size = 12),
+        axis.text.x = element_text(size = 10)) +
+  #ylab("No. patients") +
+  #xlab("Weeks of gestation") +
+  ylab("") +
+  xlab("") 
+
+
+# TIGIT.9638.2 --------------------------------------------------------------------
+
+TIGIT.9638.2_MOM_exprs <- filter(MOM_exprs, grepl(paste("TIGIT.9638.2", collapse = "|"), AptName)) 
+TIGIT.9638.2_lgRFU_exprs <- filter(lgRFU_exprs, grepl(paste("TIGIT.9638.2", collapse = "|"), AptName)) 
+
+
+TIGIT.9638.2_hist_trim <- ggplot(data = TIGIT.9638.2_MOM_exprs, aes(x = MoM)) +
+  geom_histogram(binwidth = 0.5, fill = "#00BA38", color = "#00BA38", alpha = 0.7) +
+  ggtitle("TIGIT") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.text.y = element_text(size = 12),
+        axis.text.x = element_text(size = 10)) +
+  #ylab("No. patients") +
+  #xlab("Weeks of gestation") +
+  ylab("") +
+  xlab("") 
+
+
